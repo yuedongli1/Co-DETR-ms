@@ -1,0 +1,48 @@
+# model settings
+model:
+    type: 'CoDETR'
+    backbone:
+        type: 'ResNet'
+        depth: 50
+        out_layers: ["res2", "res3", "res4", "res5"]
+        frozen_stages: 1
+        norm: 'FrozenBN'
+    neck:
+        type: 'ChannelMapper'
+        input_channels: {"res2": 256, "res3": 512, "res4": 1024, "res5": 2048}
+        in_features: ["res2", "res3", "res4", "res5"]
+        kernel_size: 1
+        bias: False
+        out_channels: 256
+        num_outs: 5
+        norm: 'GN'
+    query_head:
+        type: 'CoDINOHead'
+        embed_dim: 256
+        num_queries: 900
+        num_classes: 80
+        transformer:
+            type: 'CoDinoTransformer'
+            num_feature_levels: 5
+            encoder:
+                type: 'DINOTransformerEncoder'
+                num_layers: 6
+                embed_dim: 256
+                num_feature_levels: 5
+                attn_dropout: 0.0
+                feedforward_dim: 2048
+                ffn_dropout: 0.0
+            decoder:
+                type: 'DINOTransformerDecoder'
+                num_layers: 6
+                embed_dim: 256
+                num_feature_levels: 5
+                return_intermediate: True
+                attn_dropout: 0.0
+                feedforward_dim: 2048
+                ffn_dropout: 0.0
+        position_embedding:
+            type: 'PositionEmbeddingSine'
+            num_pos_feats: 128
+            temperature: 20
+            normalize: True
