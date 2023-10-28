@@ -239,7 +239,7 @@ class ResNet(nn.Cell):
                                stride=2, pad_mode='pad', padding=3)
         self.bn1 = norm(self.input_channels)
         self.relu = nn.ReLU()
-        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2, pad_mode='same')
+        self.max_pool = nn.MaxPool2d(kernel_size=3, stride=2, pad_mode='pad', padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)

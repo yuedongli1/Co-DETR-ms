@@ -117,7 +117,7 @@ def get_config():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parser.add_argument("--config_path",
                         type=str,
-                        default=r"projects/configs/data/dino_r50_4scale_12epoch.yaml",
+                        default=r"projects/configs/data/data.yaml",
                         help="Config file path")
     # parser.add_argument("--config_path",
     #                     type=str,

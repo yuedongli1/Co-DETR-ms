@@ -158,7 +158,7 @@ class CoDINOHead(nn.Cell):
                 # for anchor contains only x,y
                 assert reference.shape[-1] == 2
                 tmp[..., 2] += reference
-            l_coord = tmp.sigmoid()
+            l_coord = ops.sigmoid(tmp)
             outputs_classes.append(l_class)
             outputs_coords.append(l_coord)
         # [num_decoder_layers, bs, num_query, num_classes]

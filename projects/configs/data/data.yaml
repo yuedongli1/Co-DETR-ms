@@ -5,8 +5,8 @@ batch_size: 2
 dataset_file: 'coco'
 #mindrecord_dir: C:\02Data\coco2017\MindRecord_COCO_detr
 #coco_path: C:\02Data\coco2017
-mindrecord_dir: /home/zhouwuxing/DINO-ms/data/MindRecord_COCO_detr
-coco_path: /home/zhouwuxing/DINO-ms/data/coco2017/
+mindrecord_dir: /home/mindspore/MindRecord_COCO_detr/
+coco_path: /home/mindspore/coco_val/
 pretrain_path: /home/zhouwuxing/DINO-ms/pretrained_model/dino_resnet50_backbone.ckpt
 train_data_type: "train2017"
 val_data_type: 'val2017'
@@ -17,7 +17,7 @@ python_multiprocessing: False
 num_dn: 100
 
 # Augment
-max_size: 960
+max_size: 1333
 flip_ratio: 0.5
 
 distributed: False

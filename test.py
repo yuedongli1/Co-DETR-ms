@@ -109,6 +109,7 @@ def coco_evaluate(model, eval_dateset, eval_anno_path, save_dir, raw_dir):
         iii += 1
         if False and iii > 3:
             break
+        break
 
     coco_evaluator.synchronize_between_processes()
     coco_evaluator.accumulate()
@@ -126,23 +127,19 @@ def box_cxywh2xyxy_and_scale(box, scale):
 
 if __name__ == '__main__':
     # set context
-    ms.set_context(mode=ms.PYNATIVE_MODE, device_target='CPU' if is_windows else 'GPU',
-                   pynative_synchronize=False, device_id=1)
+    ms.set_context(mode=ms.GRAPH_MODE, device_target='Ascend',
+                   pynative_synchronize=True)
     rank = 0
     device_num = 1
     set_seed(0)
 
-    config_file = 'D:/Co-DETR-ms/projects/configs/co_dino/co_dino_5scal_r50_1x_coco.yaml'
+    config_file = './projects/configs/co_dino/co_dino_5scal_r50_1x_coco.yaml'
     with open(config_file, 'r') as ifs:
         cfg = yaml.safe_load(ifs)
     eval_model = build_co_detr(cfg['model'])
     eval_model.set_train(False)
 
     model_path = './co_dino_from_torch.ckpt'
-    ms.load_checkpoint(model_path, eval_model)
-
-    pth_dir = r"C:\02Data\models" if is_windows else '/data1/zhouwuxing/pretrained_model/'
-    model_path = os.path.join(pth_dir, "ms_dino_r50_4scale_12ep_49_2AP.ckpt")
     ms.load_checkpoint(model_path, eval_model)
 
     # evaluate coco

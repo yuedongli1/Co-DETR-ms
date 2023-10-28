@@ -204,7 +204,6 @@ def preprocess_fn(args, image_id, image, image_anno_dict, is_training):
             transform.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
         # pad image and gt, then get masks of both
-        print(f'num dn in dataset is {args.num_dn}')
         out_data = transform.OutData(is_training=False, max_size=args.max_size)
 
     image_shape = image.shape[:2]
@@ -238,7 +237,6 @@ def create_detr_dataset(args, mindrecord_file, batch_size=2, device_num=1,
     if is_training:
         ds = ds.map(input_columns=["image_id", "image", "annotation"],
                     output_columns=["image", "mask", "boxes", "labels", "valid", "dn_valid"],
-                    column_order=["image", "mask", "boxes", "labels", "valid", "dn_valid"],
                     operations=compose_map_func, python_multiprocessing=python_multiprocessing,
                     num_parallel_workers=num_parallel_workers)
         # ds.project(["image", "mask", "boxes", "labels", "valid"])
@@ -246,7 +244,6 @@ def create_detr_dataset(args, mindrecord_file, batch_size=2, device_num=1,
     else:
         ds = ds.map(input_columns=["image_id", "image", "annotation"],
                     output_columns=["image", "mask", "image_id", "ori_size"],
-                    column_order=["image", "mask", "image_id", "ori_size"],
                     operations=compose_map_func,
                     num_parallel_workers=num_parallel_workers)
         # ds.project(["image", "mask", "image_id", "ori_size"])

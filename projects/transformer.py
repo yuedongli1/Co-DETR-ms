@@ -90,7 +90,6 @@ class CoDinoTransformer(nn.Cell):
         self.embed_dim = embed_dim
 
         self.level_embeds = ms.Parameter(init.initializer(init.Uniform(), (self.num_feature_levels, self.embed_dim)))
-        self.level_embeds_list = ops.split(self.level_embeds, 1, 0)
         # self.level_embeds = nn.Embedding(self.num_feature_levels, self.embed_dim)
         self.learnt_init_query = learnt_init_query
         if self.learnt_init_query:
@@ -118,7 +117,7 @@ class CoDinoTransformer(nn.Cell):
             attn_masks (List[Tensor]): attention map for dn
         """
         feat_flatten, mask_flatten, lvl_pos_embed_flatten, spatial_shapes = \
-            multi_2_flatten(multi_level_feats, multi_level_masks, multi_level_pos_embeds, self.level_embeds_list)
+            multi_2_flatten(multi_level_feats, multi_level_masks, multi_level_pos_embeds, self.level_embeds)
 
         valid_ratios = ops.stack([get_valid_ratio(m) for m in multi_level_masks], 1)  # (bs, num_level, 2)
 
