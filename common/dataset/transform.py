@@ -213,13 +213,12 @@ class OutData(object):
         self.num_dn = num_dn
 
     def __call__(self, img, target):
-
         # pad image
-        # img, target = self.pad_func(img, target)
+        img, target = self.pad_func(img, target)
         img_data = img.transpose((2, 0, 1)).astype(np.float32)
-        # mask = target['mask']  # (max_size, max_size) 0 keep, 1 drop
-        c, h, w = img_data.shape
-        mask = np.zeros((h, w)).astype(np.float32)
+        mask = target['mask']  # (max_size, max_size) 0 keep, 1 drop
+        # c, h, w = img_data.shape
+        # mask = np.zeros((h, w)).astype(np.float32)
         #
         if self.is_training:
             boxes = target['boxes'].astype(np.float32)

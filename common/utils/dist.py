@@ -1,15 +1,9 @@
-import mindspore as ms
+from mindspore import ops
+from mindspore.ops import ReduceOp
+from mindspore.communication.management import get_group_size
 
-ms.ops.distribute
-ms.communication.GlobalComm.INITED
 
-def is_dist_avail_and_initialized() -> bool:
-    """
-    Checking if the distributed package is available and
-    the default process group has been initialized.
-    """
-    if not dist.is_available():
-        return False
-    if not dist.is_initialized():
-        return False
-    return True
+def reduce_mean(tensor):
+    """"Obtain the mean of tensor on different NPUs."""
+    tensor = tensor.copy()
+    return ops.AllReduce(ReduceOp.SUM)(ops.div(tensor, get_group_size()))

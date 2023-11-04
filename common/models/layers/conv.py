@@ -1,6 +1,7 @@
 from functools import partial
 
-from mindspore import nn
+from mindspore import nn, ops
+import mindspore as ms
 
 
 class ConvNormAct(nn.Cell):

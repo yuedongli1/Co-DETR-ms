@@ -12,7 +12,7 @@ def split(value, indices, axis):
         count = total // indices
         indices = [indices for _ in range(count)]
 
-    split_starts, split_ends= get_list_cum_sum(indices, 2)
+    split_starts, split_ends = get_list_cum_sum(indices, 2)
     outs = []
     count = len(indices)
     for i in range(count):

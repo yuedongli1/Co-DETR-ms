@@ -12,46 +12,61 @@ from tqdm import tqdm
 import yaml
 
 from common.dataset.coco_eval import CocoEvaluator
-from common.dataset.dataset import create_mindrecord, create_detr_dataset, coco_classes, coco_clsid_to_catid, \
+from common.dataset.dataset import create_mindrecord, create_detr_dataset, coco_clsid_to_catid, \
     coco_id_dict
-from common.utils.box_ops import box_cxcywh_to_xyxy, box_scale
-from common.utils.system import is_windows
+from common.core.bbox.transforms import box_cxcywh_to_xyxy, box_scale
 from config import config
-from projects.models.builder import build_co_detr
+from projects.co_detr import build_co_detr
+from common.utils.misc import _nms
 
 
-def select_from_prediction(box_cls, box_pred, num_select=300):
-
+def select_from_prediction(box_cls, box_pred, ori_size, num_select=300, test_cfg=None):
+    nms_type = test_cfg.get('nms_type', None)
+    iou_thres = test_cfg.get('iou_threshold', None)
     bs, num_query, num_class = box_cls.shape
-
+    if nms_type:
+        num_select = num_query
     # box_cls.shape: 1, 300, 80
     # box_pred.shape: 1, 300, 4
     prob = box_cls.sigmoid()
-    # TODO 不理解为什么如此选取topk，这样选取的bbox有许多重复的, 用一个query可以预测多个class
-    # num_query*num_class must on the last axis
-    # (bs, num_query, num_class) -> (bs, num_query*num_class) -> (bs, num_select) + (bs, num_select)
     topk_values, topk_indexes_full = ops.topk(prob.view(bs, -1), num_select)
-    scores = topk_values
     # (bs, num_select)
     topk_boxes_ind = ops.div(topk_indexes_full.astype(ms.float32),
                              num_class, rounding_mode="floor").astype(ms.int32)
 
-    labels = topk_indexes_full % num_class  # (bs, num_select)
     boxes = ops.gather_elements(box_pred, 1, ms_np.tile(topk_boxes_ind.unsqueeze(-1), (1, 1, 4)))  # (bs,num_eval,4)
 
-    return scores, labels, boxes
-
-
-def inference(model, image, mask, ori_size, num_select=300):
-    # image, mask, image_id, ori_size = data
-    output = model(image, mask)
-
-    box_cls, box_pred = output
-    assert len(box_cls) == len(image)
-    scores, labels, boxes = select_from_prediction(box_cls, box_pred, num_select)
     boxes_xyxy = box_cxcywh_to_xyxy(boxes)  # (bs, num_select, 4)
     boxes_xyxy_scaled = box_scale(boxes_xyxy, scale=ori_size)  # (bs, num_select, 4)
+
+    labels = (topk_indexes_full % num_class)  # (bs, num_select)
+    scores = topk_values
+
+    # if nms_type:
+    #     scores = scores[0].asnumpy()
+    #     boxes_xyxy_scaled = boxes_xyxy_scaled.asnumpy()
+    #     labels = labels[0].asnumpy()
+    #     max_coordinate = boxes_xyxy_scaled.max()
+    #     offsets = labels * (max_coordinate + 1)
+    #     boxes_for_nms = (boxes_xyxy_scaled + offsets[:, None])
+    #     i = _nms(boxes_for_nms, scores, iou_thres, nms_type)  # NMS for per sample
+    #     boxes_xyxy_scaled = boxes_xyxy_scaled[i]
+    #     labels = labels[i]
+    #     scores = scores[None, :]
+    #     labels = labels[None, :]
+    #     boxes_xyxy_scaled = boxes_xyxy_scaled[None, :]
+
     return scores, labels, boxes_xyxy_scaled
+
+
+def inference(model, image, mask, ori_size, num_select=300, test_cfg=None):
+    # image, mask, image_id, ori_size = data
+    output = model(image, mask)
+    box_cls, box_pred = output
+    assert len(box_cls) == len(image)
+    scores, labels, boxes = select_from_prediction(box_cls, box_pred, ori_size, num_select, test_cfg)
+
+    return scores, labels, boxes
 
 
 def visualize(pred_dict: Dict, coco_gt: COCO, save_dir, raw_dir):
@@ -85,7 +100,7 @@ def visualize(pred_dict: Dict, coco_gt: COCO, save_dir, raw_dir):
         cv2.imwrite(save_path, image)
 
 
-def coco_evaluate(model, eval_dateset, eval_anno_path, save_dir, raw_dir):
+def coco_evaluate(model, eval_dateset, eval_anno_path, test_cfg, save_dir, raw_dir):
     # coco evaluator
     coco_gt = COCO(eval_anno_path)
     coco_evaluator = CocoEvaluator(coco_gt, ('bbox', ))
@@ -94,22 +109,21 @@ def coco_evaluate(model, eval_dateset, eval_anno_path, save_dir, raw_dir):
     start_time = time.time()
     num_select = 300
     ds_size = dataset.get_dataset_size()
-    iii = 0
+    i = 0
+    current_start_time = time.time()
     for data in tqdm(eval_dateset.create_dict_iterator(), total=ds_size, desc=f'inferring...'):
         image_id = data['image_id'].asnumpy()  # (bs, )
         image = data['image']  # (bs, c, h, w)
         mask = data['mask']  # (bs, h, w)
         size_wh = data['ori_size'][:, ::-1]  # (bs, 2), in wh order
-        scores, labels, boxes = inference(model, image, mask, size_wh, num_select)
+        scores, labels, boxes = inference(model, image, mask, size_wh, num_select, test_cfg)
         cat_ids = Tensor(np.vectorize(coco_clsid_to_catid.get)(labels.asnumpy()))
         res = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, cat_ids, boxes)]
         img_res = {int(idx): output for idx, output in zip(image_id, res)}
         coco_evaluator.update(img_res)
-        visualize(img_res, coco_gt, save_dir, raw_dir)
-        iii += 1
-        if False and iii > 3:
-            break
-        break
+        # visualize(img_res, coco_gt, save_dir, raw_dir)
+        print(f'current image cost time: {time.time() - current_start_time}s', )
+        current_start_time = time.time()
 
     coco_evaluator.synchronize_between_processes()
     coco_evaluator.accumulate()
@@ -119,16 +133,10 @@ def coco_evaluate(model, eval_dateset, eval_anno_path, save_dir, raw_dir):
     print("\n========================================\n")
 
 
-def box_cxywh2xyxy_and_scale(box, scale):
-    b_cxywh = box_cxcywh_to_xyxy(box)
-    b_scaled = box_scale(b_cxywh, scale)
-    return b_scaled
-
-
 if __name__ == '__main__':
     # set context
     ms.set_context(mode=ms.GRAPH_MODE, device_target='Ascend',
-                   pynative_synchronize=True)
+                   pynative_synchronize=False)
     rank = 0
     device_num = 1
     set_seed(0)
@@ -142,6 +150,8 @@ if __name__ == '__main__':
     model_path = './co_dino_from_torch.ckpt'
     ms.load_checkpoint(model_path, eval_model)
 
+    ms.amp.auto_mixed_precision(eval_model, amp_level='O3')
+
     # evaluate coco
     mindrecord_file = create_mindrecord(config, rank, "DETR.mindrecord.eval", False)
     dataset = create_detr_dataset(config, mindrecord_file, batch_size=1,
@@ -154,4 +164,4 @@ if __name__ == '__main__':
     anno_json = os.path.join(config.coco_path, "annotations/instances_val2017.json")
     vis_save_dir = os.path.join(config.coco_path, 'val2017_vis')
     raw_img_dir = os.path.join(config.coco_path, 'val2017')
-    coco_evaluate(eval_model, dataset, anno_json, vis_save_dir, raw_img_dir)
+    coco_evaluate(eval_model, dataset, anno_json, cfg['test_cfg'], vis_save_dir, raw_img_dir)

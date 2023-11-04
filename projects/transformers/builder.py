@@ -1,4 +1,4 @@
-from projects.transformer import CoDinoTransformer
+from projects.transformers.transformer import CoDinoTransformer
 
 transformer_types = {'CoDinoTransformer': CoDinoTransformer}
 

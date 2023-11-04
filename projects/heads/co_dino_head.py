@@ -5,13 +5,16 @@ from typing import List
 import mindspore as ms
 from mindspore import nn, ops, Tensor
 import mindspore.common.initializer as init
+import mindspore.numpy as ms_np
 
 from common.models.layers.mlp import MLP
-from common.utils.misc import inverse_sigmoid
+from common.utils.misc import inverse_sigmoid, replace_invalid
 from common.utils.torch_converter import init_like_torch
 from common.models.layers.builder import build_position_embedding
+from common.core.bbox.transforms import box_xyxy_to_cxcywh, box_cxcywh_to_xyxy
 
-from projects.transformer_builder import build_transformer
+from projects.transformers.builder import build_transformer
+from projects.criterions.builder import build_criterion
 
 
 class CoDINOHead(nn.Cell):
@@ -42,8 +45,13 @@ class CoDINOHead(nn.Cell):
                  embed_dim: int,
                  num_classes: int,
                  num_queries: int,
+                 aux_loss: bool = True,
+                 num_dn: int = 100,
+                 label_noise_ratio: float = 0.2,
+                 box_noise_scale: float = 1.0,
                  transformer=None,
                  position_embedding=None,
+                 criterion=None
                  ):
         super().__init__()
         # number of dynamic anchor boxes and embedding dimension
@@ -56,6 +64,12 @@ class CoDINOHead(nn.Cell):
         # define position embedding module
         self.position_embedding = build_position_embedding(position_embedding)
 
+        # # define criterion
+        self.criterion = build_criterion(criterion)
+
+        # define where to calculate auxiliary loss in criterion
+        self.aux_loss = aux_loss
+
         # define classification head and box head
         self.class_embed = nn.Dense(embed_dim, num_classes)
         self.bbox_embed = MLP(embed_dim, embed_dim, 4, 3)
@@ -63,6 +77,10 @@ class CoDINOHead(nn.Cell):
 
         # de-noising
         self.label_enc = nn.Embedding(num_classes, embed_dim)
+        self.num_dn = num_dn
+        self.num_cdn = num_dn * 2
+        self.label_noise_ratio = label_noise_ratio
+        self.box_noise_scale = box_noise_scale
 
         # initialize weights
         prior_prob = 0.01
@@ -128,7 +146,19 @@ class CoDINOHead(nn.Cell):
             multi_level_masks.append(l_mask)
             multi_level_position_embeddings.append(self.position_embedding(multi_level_masks[-1]))
 
+        # de-noising preprocessing
+        # prepare label query embeding
         input_query_label, input_query_bbox, attn_mask, dn_valids = None, None, None, None
+        if self.training:
+            input_query_label, input_query_bbox, attn_mask, dn_valids = self.cdn_preprocess(
+                targets,
+                num_dn=self.num_dn,
+                label_noise_ratio=self.label_noise_ratio,
+                box_noise_scale=self.box_noise_scale,
+                num_query=self.num_queries,
+                num_classes=self.num_classes,
+            )
+
         query_embeds = (input_query_label, input_query_bbox)
 
         # feed into transformer
@@ -166,4 +196,138 @@ class CoDINOHead(nn.Cell):
         # [num_decoder_layers, bs, num_query, 4]
         outputs_coord = ops.stack(outputs_coords)
 
-        return outputs_class[-1], outputs_coord[-1]
+        # output (tuple(tuple(Tensor))) with size 3 -> last, aux, two_stage, dn_last, dn_aux
+        output = [None, None, None, None, None]
+        if self.training:
+            outputs_class, outputs_coord, gt_query_class, gt_query_coord = \
+                self.cdn_postprocess(outputs_class, outputs_coord, self.num_cdn)
+            if self.num_dn > 0:
+                output[3] = (gt_query_class[-1], gt_query_coord[-1])
+                if self.aux_loss:
+                    output[4] = (gt_query_class[:-1], gt_query_coord[:-1])
+
+        # prepare for loss computation
+        output[0] = (outputs_class[-1], outputs_coord[-1])
+        if self.aux_loss:
+            # len(output["aux_outputs"]) = num_decoder_layer - 1
+            output[1] = (outputs_class[:-1], outputs_coord[:-1])
+
+        # prepare two stage output
+        interm_coord = enc_reference
+        # hack implementaion, the class_embed of the last layer of transformer.decoder serves for two stage
+        # TODO 感觉这里可以写在transformer class里，直接输出interm_class，不知作者这么写是不是为了兼容其他的detr
+        interm_class = self.transformer.decoder.class_embed[-1](enc_state)
+        output[2] = (interm_class, interm_coord)
+
+        if self.training:
+            loss = self.criterion(output, targets)
+            return loss
+
+        return output[0]
+
+    def cdn_postprocess(self, outputs_class, outputs_coord, num_cdn):
+        """
+        cdn postporcess
+        Args:
+            outputs_class (Tensor[[num_decoder_layers, bs, num_query, 4]]): outputs class with gt and match query
+            outputs_coord (Tensor[[num_decoder_layers, bs, num_query, 4]]): outputs box coordinates
+             with gt and match query
+            num_cdn (int): number of contrastive de-noising query
+        """
+        if num_cdn <= 0:
+            return outputs_class, outputs_coord, None, None
+
+        gt_query_class = outputs_class[:, :, :num_cdn, :]
+        gt_query_coord = outputs_coord[:, :, :num_cdn, :]
+        match_query_class = outputs_class[:, :, num_cdn:, :]
+        match_query_coord = outputs_coord[:, :, num_cdn:, :]
+
+        return match_query_class, match_query_coord, gt_query_class, gt_query_coord
+
+    def cdn_preprocess(
+            self,
+            targets,
+            num_dn,
+            label_noise_ratio,
+            box_noise_scale,
+            num_query,
+            num_classes,
+    ):
+        """
+        generate cdn gt query
+        Args:
+            targets (Tuple[Tensor]): tuple of gt label, bbox, valid mask and dn_positive_id, dn_valid_mask
+            num_dn (int): positive dn number
+            label_enc (nn.Embedding[num_class, embed_dim]): label embedding table
+        """
+        if num_dn <= 0:
+            return None, None, None, None
+
+        tgt_labels, tgt_boxes, tgt_valids = targets[:3]
+        dn_valids = targets[3]
+        assert dn_valids.shape[
+                   1] == num_dn, f"num_dn should be set as the same in dataset({dn_valids.shape[1]}) and model({num_dn})"
+        bs, num_pad_box = tgt_labels.shape
+        tgt_labels = replace_invalid(tgt_labels, tgt_valids, num_classes - 1)
+        num_valid_box = ops.reduce_sum(tgt_valids.astype(ms.float32), 1).astype(ms.int32)  # (bs)
+
+        dn_positive_ids = ops.expand_dims(ms_np.arange(num_dn), 0) % num_valid_box.expand_dims(1)  # (bs, num_dn)
+        dn_positive_ids = replace_invalid(dn_positive_ids, dn_valids, num_pad_box - 1)  # 012 012 012 -1
+
+        known_labels = ops.gather_elements(tgt_labels, 1, dn_positive_ids)  # (bs, num_dn)
+        known_boxes = ops.gather_elements(tgt_boxes, 1, ms_np.tile(ops.expand_dims(dn_positive_ids, -1), (1, 1, 4)))
+
+        # add negative query
+        num_cdn = num_dn * 2
+        known_labels = ops.concat([known_labels, known_labels], axis=1)  # (bs, num_cdn)
+        known_boxes = ops.concat([known_boxes, known_boxes], axis=1)  # (bs, num_cdn, 4)
+        # cdn_valids = ops.concat([dn_valids, dn_valids], axis=1)  # (bs, num_cdn)
+
+        if label_noise_ratio > 0:
+            p = self.uniform_real(known_labels.shape)
+            noise_mask = p < label_noise_ratio * 0.5
+            rand_labels = self.uniform_int(known_labels.shape, Tensor(0, ms.int32), Tensor(num_classes, ms.int32))
+            known_labels = ops.logical_not(noise_mask).astype(ms.int32) * known_labels \
+                           + noise_mask.astype(ms.int32) * rand_labels
+
+        if box_noise_scale > 0:
+            known_box_xyxy = box_cxcywh_to_xyxy(known_boxes)
+            half_wh = ops.concat([known_boxes[..., 2:] / 2, known_boxes[..., 2:] / 2], axis=-1)
+
+            rand_sign = ops.cast(self.uniform_int(known_boxes.shape, Tensor(0, ms.int32), Tensor(2, ms.int32)) * 2 - 1,
+                                 ms.float32)
+            rand_part = self.uniform_real(known_boxes.shape)
+
+            rand_part[:, num_dn:] += 1  # for positive 0-1, for negative 1-2
+            rand_part *= rand_sign
+            known_box_xyxy = known_box_xyxy + ops.mul(rand_part,
+                                                      half_wh) * box_noise_scale  # add noise to the rect corner point
+            known_box_xyxy = ops.clip_by_value(known_box_xyxy, clip_value_min=Tensor(0.0), clip_value_max=Tensor(1.0))
+
+            known_boxes = box_xyxy_to_cxcywh(known_box_xyxy)
+
+        input_label_embed = self.label_enc(known_labels)  # (bs, num_cdn)
+        input_box_embed = inverse_sigmoid(known_boxes)  # (bs, num_cdn, 4)
+
+        # attn mask, if True, means communication is blocked
+        attn_mask = ops.zeros((bs, num_cdn + num_query, num_cdn + num_query), ms.bool_)  # all false, means no mask
+        # match query cannot see gt query, left bottom gray part of the figure in the original paper
+        attn_mask[:, num_cdn:, :num_cdn] = True
+
+        # gt query from different group cannot see each other
+        gt_query_coor = ops.stack(ops.meshgrid(ms_np.arange(num_dn), ms_np.arange(num_dn), indexing='ij'),
+                                  -1)  # (num_dn, num_dn, 2)
+        gt_query_coor = ms_np.tile(gt_query_coor.expand_dims(0), (bs, 1, 1, 1))  # (bs, num_dn, num_dn, 2)
+        div = ops.floor_div(gt_query_coor, num_valid_box[:, None, None, None]).astype(ms.float32).min(axis=3).astype(
+            ms.int32)  # (bs, num_dn, num_dn)
+        left_top_coor = gt_query_coor - ops.expand_dims(div, -1) * num_valid_box[:, None, None, None]
+        gt_query_mask = left_top_coor.max(-1) >= num_valid_box[:, None, None]  # (bs, num_dn, num_dn)
+        dn_2d_invalid_mask = ops.logical_not(
+            ops.logical_and(dn_valids[:, None, :], dn_valids[:, :, None]))  # (bs, num_dn, num_dn)
+        gt_query_mask = ops.logical_or(gt_query_mask, dn_2d_invalid_mask)  # set true for the padding area
+
+        temp = ops.concat([gt_query_mask, gt_query_mask], axis=1)  # (bs, num_cdn, num_dn)
+        temp = ops.concat([temp, temp], axis=2)  # (bs, num_cdn, num_cdn)
+        attn_mask[:, :num_cdn, :num_cdn] = temp
+
+        return input_label_embed, input_box_embed, attn_mask, dn_valids

@@ -25,8 +25,6 @@ from typing import Tuple
 import mindspore as ms
 from mindspore import Tensor, ops
 import mindspore.numpy as ms_np
-# import torch
-# from torchvision.ops.boxes import box_area
 
 
 def box_cxcywh_to_xyxy(bbox) -> Tensor:

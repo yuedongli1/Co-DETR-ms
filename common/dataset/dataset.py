@@ -184,18 +184,18 @@ def preprocess_fn(args, image_id, image, image_anno_dict, is_training):
         trans = transform.Compose([
             transform.RandomHorizontalFlip(),
             transform.RandomSelect(
-                transform.RandomResize(max_h_arr, args.max_size),
+                transform.RandomResize(max_h_arr, 512),
                 transform.Compose([
                     transform.RandomResize([400, 500, 600]),
                     transform.RandomSizeCrop(384, 600),
-                    transform.RandomResize(max_h_arr, max_size=args.max_size),
+                    transform.RandomResize(max_h_arr, max_size=512),
                 ])
             ),
             # normalize both image and boxes
             transform.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
         # pad image and get mask
-        out_data = transform.OutData(is_training=True, max_size=args.max_size, num_dn=args.num_dn)
+        out_data = transform.OutData(is_training=True, max_size=512, num_dn=args.num_dn)
     else:
         trans = transform.Compose([
             # resize image, boxes value updated
