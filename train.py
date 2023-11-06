@@ -5,7 +5,8 @@ from datetime import datetime
 from mindspore.communication import init, get_rank, get_group_size
 
 import mindspore as ms
-from mindspore import nn, context, ParallelMode
+from mindspore import nn, context, ParallelMode, ops
+from mindspore.amp import DynamicLossScaler
 
 from common.dataset.dataset import create_mindrecord, create_detr_dataset
 from common.utils.utils import set_seed
@@ -15,7 +16,7 @@ from projects.co_detr import build_co_detr
 
 if __name__ == '__main__':
     # set context, seed
-    context.set_context(mode=context.PYNATIVE_MODE, device_target='Ascend', pynative_synchronize=True)
+    context.set_context(mode=context.GRAPH_MODE, device_target='Ascend', pynative_synchronize=False)
     set_seed(0)
 
     if config.distributed:
@@ -79,10 +80,18 @@ if __name__ == '__main__':
 
     # create model with loss scale
     co_detr.set_train(True)
-    scale_sense = nn.DynamicLossScaleUpdateCell(loss_scale_value=2 ** 12, scale_factor=2, scale_window=1000)
-    model = TrainOneStepWithGradClipLossScaleCell(co_detr, optimizer, scale_sense, grad_clip=True, clip_value=0.1)
+    # scale_sense = nn.DynamicLossScaleUpdateCell(loss_scale_value=2 ** 12, scale_factor=2, scale_window=1000)
+    # model = TrainOneStepWithGradClipLossScaleCell(co_detr, optimizer, scale_sense, grad_clip=True, clip_value=0.1)
     # model = nn.TrainOneStepWithLossScaleCell(dino, optimizer, scale_sense)
     # model = nn.TrainOneStepCell(dino, optimizer)
+
+    scaler = DynamicLossScaler(scale_value=2 ** 12, scale_factor=2, scale_window=1000)
+
+    def forward_func(*data):
+        loss = co_detr(*data)
+        return scaler.scale(loss)
+
+    grad_fn = ops.value_and_grad(forward_func, grad_position=None, weights=optimizer.parameters)
 
     # training loop
     log_loss_step = 1
@@ -95,7 +104,13 @@ if __name__ == '__main__':
             # image, img_mask(1 for padl), gt_box, gt_label, gt_valid(True for valid)
             input_data = in_data['image'], in_data['mask'], \
                          (in_data['labels'], in_data['boxes'], in_data['valid'], in_data['dn_valid'])
-            loss, _, _ = model(*input_data)
+            loss, grads = grad_fn(*input_data)
+
+            grads = ops.clip_by_global_norm(grads, clip_norm=0.1)
+            loss = ops.depend(loss, optimizer(grads))
+            loss = scaler.unscale(loss)
+
+            # loss, _, _ = model(*input_data)
 
             # put on screen
             now = datetime.now()
@@ -114,6 +129,6 @@ if __name__ == '__main__':
         # save checkpoint every epoch
         print(f'saving checkpoint for epoch {e_id}')
         ckpt_path = os.path.join(config.output_dir, f'dino_epoch{e_id:03d}_rank{rank}.ckpt')
-        ms.save_checkpoint(model, ckpt_path)
+        ms.save_checkpoint(co_detr, ckpt_path)
 
     print(f'finish training for dino')
