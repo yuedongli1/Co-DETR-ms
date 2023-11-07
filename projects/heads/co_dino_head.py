@@ -3,7 +3,7 @@ import math
 from typing import List
 
 import mindspore as ms
-from mindspore import nn, ops, Tensor
+from mindspore import nn, ops, Tensor, jit
 import mindspore.common.initializer as init
 import mindspore.numpy as ms_np
 
@@ -117,7 +117,7 @@ class CoDINOHead(nn.Cell):
         self.uniform_real = ops.UniformReal()
         self.uniform_int = ops.UniformInt()
 
-    def construct(self, multi_level_feats, images, img_masks, targets=None):
+    def construct(self, multi_level_feats, images, img_masks, gt_label=None, gt_box=None, gt_valid=None, dn_valid=None):
         """Forward function of `DINO` which excepts a list of dict as inputs.
 
         Args:
@@ -142,7 +142,6 @@ class CoDINOHead(nn.Cell):
         for feat in multi_level_feats:
             resize_nearest = ops.ResizeNearestNeighbor(size=feat.shape[-2:])
             l_mask = ops.squeeze(resize_nearest(ops.expand_dims(img_masks, 0)), 0)
-            l_mask = ops.cast(l_mask, ms.bool_)
             multi_level_masks.append(l_mask)
             multi_level_position_embeddings.append(self.position_embedding(multi_level_masks[-1]))
 
@@ -151,7 +150,10 @@ class CoDINOHead(nn.Cell):
         input_query_label, input_query_bbox, attn_mask, dn_valids = None, None, None, None
         if self.training:
             input_query_label, input_query_bbox, attn_mask, dn_valids = self.cdn_preprocess(
-                targets,
+                gt_label,
+                gt_box,
+                gt_valid,
+                dn_valid,
                 num_dn=self.num_dn,
                 label_noise_ratio=self.label_noise_ratio,
                 box_noise_scale=self.box_noise_scale,
@@ -220,7 +222,7 @@ class CoDINOHead(nn.Cell):
         output[2] = (interm_class, interm_coord)
 
         if self.training:
-            loss = self.criterion(output, targets)
+            loss = self.criterion(output, gt_label, gt_box, gt_valid, dn_valid)
             return loss
 
         return output[0]
@@ -246,7 +248,10 @@ class CoDINOHead(nn.Cell):
 
     def cdn_preprocess(
             self,
-            targets,
+            tgt_labels,
+            tgt_boxes,
+            tgt_valids,
+            dn_valids,
             num_dn,
             label_noise_ratio,
             box_noise_scale,
@@ -263,16 +268,14 @@ class CoDINOHead(nn.Cell):
         if num_dn <= 0:
             return None, None, None, None
 
-        tgt_labels, tgt_boxes, tgt_valids = targets[:3]
-        dn_valids = targets[3]
         assert dn_valids.shape[
                    1] == num_dn, f"num_dn should be set as the same in dataset({dn_valids.shape[1]}) and model({num_dn})"
         bs, num_pad_box = tgt_labels.shape
-        tgt_labels = replace_invalid(tgt_labels, tgt_valids, num_classes - 1)
+        tgt_labels = replace_invalid(tgt_labels, tgt_valids, num_classes)
         num_valid_box = ops.reduce_sum(tgt_valids.astype(ms.float32), 1).astype(ms.int32)  # (bs)
 
         dn_positive_ids = ops.expand_dims(ms_np.arange(num_dn), 0) % num_valid_box.expand_dims(1)  # (bs, num_dn)
-        dn_positive_ids = replace_invalid(dn_positive_ids, dn_valids, num_pad_box - 1)  # 012 012 012 -1
+        dn_positive_ids = replace_invalid(dn_positive_ids, dn_valids, num_pad_box)  # 012 012 012 -1
 
         known_labels = ops.gather_elements(tgt_labels, 1, dn_positive_ids)  # (bs, num_dn)
         known_boxes = ops.gather_elements(tgt_boxes, 1, ms_np.tile(ops.expand_dims(dn_positive_ids, -1), (1, 1, 4)))

@@ -42,44 +42,41 @@ class TwoStageCriterion(SetCriterion):
         """
         self.compute_two_stage_loss(outputs, targets)
 
-    def compute_two_stage_loss(self, outputs, targets):
+    def compute_two_stage_loss(self, outputs, gt_label, gt_box, gt_valid):
         outputs_last_encoder = outputs[0]
-        outputs_auxiliary =  outputs[1]
+        outputs_auxiliary = outputs[1]
         outputs_encoder = outputs[2]
         # Retrieve the matching between the outputs of the last layer and the targets
 
         # Compute all the requested losses
         base_loss_names = ['loss_class', 'loss_bbox', 'loss_giou']
-        loss_names = []
-        loss_values = []
+        loss_names = ['loss_class', 'loss_bbox', 'loss_giou', 'loss_class_0', 'loss_bbox_0', 'loss_giou_0', 'loss_class_1', \
+        'loss_bbox_1', 'loss_giou_1', 'loss_class_2', 'loss_bbox_2', 'loss_giou_2', 'loss_class_3', 'loss_bbox_3', \
+        'loss_giou_3', 'loss_class_4', 'loss_bbox_4', 'loss_giou_4', 'loss_class_enc', 'loss_bbox_enc', 'loss_giou_enc']
+        loss_values = ()
 
         # get 3 basic loss, label, bbox and giou
-        loss_last_decoder = self.get_loss(outputs_last_encoder, self.get_matched_target(outputs_last_encoder, targets))
-        loss_names.extend(base_loss_names)
-        loss_values.extend(loss_last_decoder)
+        loss_last_decoder = self.get_loss(outputs_last_encoder, self.get_matched_target(outputs_last_encoder, gt_label, gt_box, gt_valid))
+        # loss_names.extend(base_loss_names)
+        loss_values += loss_last_decoder
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if outputs_auxiliary is not None:
             aux_len = len(outputs_auxiliary[0])
             for i in range(aux_len):
                 aux_out = (outputs_auxiliary[0][i], outputs_auxiliary[1][i])
-                loss_aux = self.get_loss(aux_out, self.get_matched_target(outputs_last_encoder, targets))
-                loss_names.extend([k + f"_{i}" for k in base_loss_names])
-                loss_values.extend(loss_aux)
+                loss_aux = self.get_loss(aux_out, self.get_matched_target(outputs_last_encoder, gt_label, gt_box, gt_valid))
+                # loss_names.extend([k + f"_{i}" for k in base_loss_names])
+                loss_values += loss_aux
 
         # for two stage
         if outputs_encoder is not None:
-            if self.two_stage_binary_cls:
-                # reset target label, 0 means object, 1-79 no object
-                for bt in targets:
-                    bt["labels"] = ops.zeros_like(bt["labels"])
-            loss_enc = self.get_loss(outputs_encoder, self.get_matched_target(outputs_last_encoder, targets))
-            loss_names.extend([k + "_enc" for k in base_loss_names])
-            loss_values.extend(loss_enc)
+            loss_enc = self.get_loss(outputs_encoder, self.get_matched_target(outputs_last_encoder, gt_label, gt_box, gt_valid))
+            # loss_names.extend([k + "_enc" for k in base_loss_names])
+            loss_values += loss_enc
 
         losses = {}
-        for k, v in zip(loss_names, loss_values):
-            losses[k] = v
+        losses.update({k: v for k, v in zip(loss_names, loss_values)})
         return losses
 
 
@@ -107,7 +104,7 @@ class DINOCriterion(TwoStageCriterion):
             num_classes, matcher, weight_dict, losses, eos_coef, loss_class_type, alpha, gamma, two_stage_binary_cls)
         self.num_dn = num_dn
 
-    def construct(self, outputs, targets, dn_metas=None):
+    def construct(self, outputs, gt_label, gt_box, gt_valid, dn_valid):
         """This performs the loss computation.
         Parameters:
              outputs: dict of tensors, see the output specification of the model for the format
@@ -117,17 +114,17 @@ class DINOCriterion(TwoStageCriterion):
         """
         # two_stage loss (tuple(Tensor)) with size 3 -> last, aux, encoder
         # each tensor contains three type of loss -> bbox, giou, class
-        loss_dict = self.compute_two_stage_loss(outputs[:3], targets[:3])
+        loss_dict = self.compute_two_stage_loss(outputs[:3], gt_label, gt_box, gt_valid)
 
         # Compute all the requested losses
-        dn_loss_dict = self.compute_dn_loss(outputs[3:5], targets)
+        dn_loss_dict = self.compute_dn_loss(outputs[3:5], gt_label, gt_box, gt_valid, dn_valid)
         loss_dict.update(dn_loss_dict)
 
         weighted_loss = self.compute_weighted_loss(loss_dict)
 
         return weighted_loss
 
-    def compute_dn_loss(self, outputs, targets):
+    def compute_dn_loss(self, outputs, gt_label, gt_box, gt_valid, dn_valid):
         """
         compute dn loss in criterion
         Args:
@@ -140,28 +137,31 @@ class DINOCriterion(TwoStageCriterion):
 
         # Compute all the requested losses
         base_loss_names = ['loss_class_dn', 'loss_bbox_dn', 'loss_giou_dn']
-        loss_names = []
-        loss_values = []
+        loss_names = ['loss_class_dn', 'loss_bbox_dn', 'loss_giou_dn', 'loss_class_dn_0', 'loss_bbox_dn_0',
+                      'loss_giou_dn_0', 'loss_class_dn_1', 'loss_bbox_dn_1', 'loss_giou_dn_1', 'loss_class_dn_2',
+                      'loss_bbox_dn_2', 'loss_giou_dn_2', 'loss_class_dn_3', 'loss_bbox_dn_3', 'loss_giou_dn_3',
+                      'loss_class_dn_4', 'loss_bbox_dn_4', 'loss_giou_dn_4']
+        loss_values = ()
 
         # get 3 basic loss, label, bbox and giou
         if last_decoder is not None:
-            loss_last_decoder = self.get_loss(last_decoder, self.get_cdn_targets(last_decoder, targets))
-            loss_names.extend(base_loss_names)
-            loss_values.extend(loss_last_decoder)
+            loss_last_decoder = self.get_loss(last_decoder, self.get_cdn_targets(last_decoder, gt_label, gt_box, gt_valid, dn_valid))
+            # loss_names.extend(base_loss_names)
+            loss_values += loss_last_decoder
 
         # auxiliary losses
         if auxiliary is not None:
             aux_len = len(auxiliary[0])
             for i in range(aux_len):
                 aux_out = (auxiliary[0][i], auxiliary[1][i])
-                loss_aux = self.get_loss(aux_out, self.get_cdn_targets(aux_out, targets))
-                loss_names.extend([k + f"_{i}" for k in base_loss_names])
-                loss_values.extend(loss_aux)
+                loss_aux = self.get_loss(aux_out, self.get_cdn_targets(aux_out, gt_label, gt_box, gt_valid, dn_valid))
+                # loss_names.extend([k + f"_{i}" for k in base_loss_names])
+                loss_values += loss_aux
 
         losses = {k: v for k, v in zip(loss_names, loss_values)}
         return losses
 
-    def get_cdn_targets(self, outputs, targets):
+    def get_cdn_targets(self, outputs, tgt_labels, tgt_boxes, tgt_valids, dn_valids):
         """
         get contrastive de-noising targets, including classes amd boxes and their valid masks
         Parameters:
@@ -177,11 +177,9 @@ class DINOCriterion(TwoStageCriterion):
         num_cdn = self.num_dn * 2
         assert num_cdn == num_query
 
-        tgt_labels, tgt_boxes, tgt_valids = targets[:3]
         bs, num_pad_box = tgt_labels.shape
         tgt_labels = replace_invalid(tgt_labels, tgt_valids, self.num_classes)
         num_valid_box = ops.reduce_sum(tgt_valids.astype(ms.float32), 1).astype(ms.int32)  # (bs)
-        dn_valids = targets[3]  # (bs, num_dn)
         assert self.num_dn == dn_valids.shape[1]
 
         src_ind = ms_np.tile(ops.expand_dims(ms_np.arange(self.num_dn), 0), (bs, 1))  # (bs, num_dn)

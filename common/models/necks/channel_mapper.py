@@ -1,7 +1,7 @@
 import copy
 from typing import Dict, List
 
-from mindspore import nn, ops
+from mindspore import nn, ops, jit
 
 from common.models.layers.conv import ConvNormAct
 

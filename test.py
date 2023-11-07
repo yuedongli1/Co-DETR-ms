@@ -150,7 +150,7 @@ if __name__ == '__main__':
     model_path = './co_dino_from_torch.ckpt'
     ms.load_checkpoint(model_path, eval_model)
 
-    ms.amp.auto_mixed_precision(eval_model, amp_level='O3')
+    ms.amp.auto_mixed_precision(eval_model, amp_level='O2')
 
     # evaluate coco
     mindrecord_file = create_mindrecord(config, rank, "DETR.mindrecord.eval", False)

@@ -102,9 +102,7 @@ if __name__ == '__main__':
     for e_id in range(epoch_num):
         for s_id, in_data in enumerate(dataset.create_dict_iterator()):
             # image, img_mask(1 for padl), gt_box, gt_label, gt_valid(True for valid)
-            input_data = in_data['image'], in_data['mask'], \
-                         (in_data['labels'], in_data['boxes'], in_data['valid'], in_data['dn_valid'])
-            loss, grads = grad_fn(*input_data)
+            loss, grads = grad_fn(in_data['image'], in_data['mask'], in_data['labels'], in_data['boxes'], in_data['valid'], in_data['dn_valid'])
 
             grads = ops.clip_by_global_norm(grads, clip_norm=0.1)
             loss = ops.depend(loss, optimizer(grads))

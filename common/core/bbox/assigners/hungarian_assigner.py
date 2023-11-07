@@ -69,7 +69,7 @@ class HungarianAssigner(nn.Cell):
             "focal_loss_cost",
         }, "only support ce loss or focal loss for computing class cost"
 
-    def construct(self, outputs, targets):
+    def construct(self, outputs, bs_tgt_labels, bs_tgt_bboxes, bs_tgt_valids):
         """Forward function for `HungarianMatcher` which performs the matching.
 
         Args:
@@ -95,7 +95,6 @@ class HungarianAssigner(nn.Cell):
         """
         pred_logits, pred_boxes = outputs
         # (bs, num_box)   (bs, num_box, 4)   (bs, num_box)
-        bs_tgt_labels, bs_tgt_bboxes, bs_tgt_valids = targets
 
         bs, num_queries = pred_logits.shape[:2]
         num_pad_box = bs_tgt_labels.shape[1]

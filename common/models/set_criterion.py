@@ -9,7 +9,7 @@ from common.utils.misc import replace_invalid
 from common.core.bbox.assigners.builder import build_assigner
 
 
-def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
+def sigmoid_focal_loss(inputs, targets, alpha: float = 0.25, gamma: float = 2):
     """
     Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
 
@@ -41,7 +41,7 @@ def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: f
         alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
         loss = alpha_t * loss
 
-    return loss.mean(1).sum() / num_boxes
+    return loss.mean()
 
 
 class SetCriterion(nn.Cell):
@@ -92,7 +92,7 @@ class SetCriterion(nn.Cell):
             self.empty_weight = empty_weight
         self.l1_loss = nn.L1Loss(reduction="none")
 
-    def loss_labels(self, src_logits, tgt_labels, tgt_valids):
+    def loss_labels(self, src_logits, tgt_labels):
         """
         Classification loss (Binary focal loss)
         outputs (Tuple[Tensor]): predictions, contains logits and bbox.
@@ -100,7 +100,6 @@ class SetCriterion(nn.Cell):
         indices (List[Tuple[Tensor, Tensor]]): list with length batch_size, each element
                                                 is the indices of source query and target bbox.
         """
-        num_valid_box = ops.reduce_sum(tgt_valids.astype(ms.float32))
         _, num_query, num_class = src_logits.shape
 
         # Computation classification loss
@@ -115,7 +114,6 @@ class SetCriterion(nn.Cell):
                     sigmoid_focal_loss(
                         src_logits,
                         target_classes_onehot.astype(ms.float32),
-                        num_boxes=num_valid_box,
                         alpha=self.alpha,
                         gamma=self.gamma,
                     )
@@ -152,7 +150,7 @@ class SetCriterion(nn.Cell):
     def get_loss(self, outputs, targets):
         src_logits, src_boxes = outputs  # (bs, num_query, num_class),
         target_labels, target_boxes, target_valids = targets # (bs, num_query, None/4/None)
-        loss_label = self.loss_labels(src_logits, target_labels, target_valids)
+        loss_label = self.loss_labels(src_logits, target_labels)
         loss_bbox, loss_giou = self.loss_boxes(src_boxes, target_boxes, target_valids)
 
         return loss_label, loss_bbox, loss_giou
@@ -213,7 +211,7 @@ class SetCriterion(nn.Cell):
         loss = sum(loss_dict.values())
         return loss
 
-    def get_matched_target(self, outputs, targets):
+    def get_matched_target(self, outputs, gt_label, gt_box, gt_valid):
         """
         get matched targets, including classes amd boxes and their valid masks
         Parameters:
@@ -225,13 +223,12 @@ class SetCriterion(nn.Cell):
             target_valids (Tensor[bs, num_query]): valid mask of target matches
         """
 
-        return self._get_matched_target_mindspore(outputs, targets)
+        return self._get_matched_target_mindspore(outputs, gt_label, gt_box, gt_valid)
 
-    def _get_matched_target_mindspore(self, outputs, targets):
-        raw_tgt_labels, raw_tgt_boxes, valid_mask = targets  # (bs, num_pad)
+    def _get_matched_target_mindspore(self, outputs, raw_tgt_labels, raw_tgt_boxes, valid_mask):
         bs, num_query, num_class = outputs[0].shape
         _, num_pad_box = raw_tgt_labels.shape
-        src_ind, tgt_ind = self.matcher(outputs, targets)  # (bs, num_pad_box)
+        src_ind, tgt_ind = self.matcher(outputs, raw_tgt_labels, raw_tgt_boxes, valid_mask)  # (bs, num_pad_box)
 
         src_ind = replace_invalid(src_ind, valid_mask, num_query)  # replace invalid with num_query
         tgt_ind = replace_invalid(tgt_ind, valid_mask, num_pad_box-1)  # replace invalid with num_query-1

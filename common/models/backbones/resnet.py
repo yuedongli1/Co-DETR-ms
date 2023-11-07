@@ -8,7 +8,7 @@ from functools import partial
 from typing import Optional, Type, List, Union, Tuple
 import download
 
-from mindspore import nn, Tensor, load_checkpoint, load_param_into_net
+from mindspore import nn, Tensor, load_checkpoint, load_param_into_net, jit
 
 
 __all__ = [

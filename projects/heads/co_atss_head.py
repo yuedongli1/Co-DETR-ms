@@ -7,6 +7,11 @@ from mindspore.communication.management import get_group_size
 from common.utils.dist import reduce_mean
 from common.utils.misc import multi_apply, unmap
 from common.core.anchor.utils import images_to_levels, anchor_inside_flags
+from common.core.bbox.coder.builder import build_bbox_coder
+from common.core.bbox.assigners.builder import build_assigner
+from common.models.losses.builder import build_loss
+from common.core.bbox.samplers.builder import build_sampler
+from common.core.anchor.builder import build_prior_generator
 
 
 class CoATSSHead(nn.Cell):

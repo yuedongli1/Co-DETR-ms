@@ -52,9 +52,9 @@ def multi_2_flatten(multi_level_feats, multi_level_masks, multi_level_pos_embeds
         lvl_pos_embed = pos_embed + level_embeds[lvl].view(1, 1, -1)  # multi-scale embed
         lvl_pos_embed_flatten.append(lvl_pos_embed)
         feat_flatten.append(feat)
-        mask_flatten.append(mask)
+        mask_flatten.append(mask.int())
     feat_flatten = ops.concat(feat_flatten, 1)
-    mask_flatten = ops.concat(mask_flatten, 1)
+    mask_flatten = ops.concat(mask_flatten, 1).bool()
     lvl_pos_embed_flatten = ops.concat(lvl_pos_embed_flatten, 1)
     # there may be slight difference of ratio values between different level due to of mask quantization
     return feat_flatten, mask_flatten, lvl_pos_embed_flatten, spatial_shapes

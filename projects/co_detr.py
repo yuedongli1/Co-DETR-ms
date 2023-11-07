@@ -22,13 +22,13 @@ class CoDETR(nn.Cell):
             self.query_head = build_head(query_head)
             head_idx += 1
 
-    def construct(self, images, img_masks, targets=None):
+    def construct(self, images, img_masks, gt_label=None, gt_box=None, gt_valid=None, dn_valid=None):
         batch_size, _, h, w = images.shape
         # extract features with backbone
         features = self.backbone(images)
 
         multi_level_feats = self.neck(features)  # list[b, embed_dim, h, w], len=num_level
-        output = self.query_head(multi_level_feats, images, img_masks, targets)
+        output = self.query_head(multi_level_feats, images, img_masks, gt_label, gt_box, gt_valid, dn_valid)
         return output
 
 
