@@ -207,7 +207,6 @@ def preprocess_fn(args, image_id, image, image_anno_dict, is_training):
         out_data = transform.OutData(is_training=False, max_size=args.max_size)
 
     image_shape = image.shape[:2]
-    ori_shape = image_shape
     gt_box = image_anno_dict[:, :4]
     # gt_label = image_anno_dict[:, 4]
     gt_label = np.vectorize(coco_catid_to_clsid.get)(image_anno_dict[:, 4])
@@ -215,9 +214,9 @@ def preprocess_fn(args, image_id, image, image_anno_dict, is_training):
     # print(f'cls id {gt_label}')
     target = {
         'image_id': image_id,
-        'boxes': gt_box,
+        'boxes_xyxy': gt_box,
         'labels': gt_label,
-        'ori_size': ori_shape,
+        'ori_size': image_shape,
         'size': image_shape
     }
     image, target = trans(image, target)
@@ -236,7 +235,7 @@ def create_detr_dataset(args, mindrecord_file, batch_size=2, device_num=1,
 
     if is_training:
         ds = ds.map(input_columns=["image_id", "image", "annotation"],
-                    output_columns=["image", "mask", "boxes", "labels", "valid", "dn_valid"],
+                    output_columns=["image", "mask", "boxes_xywhn", "boxes_xyxy", "labels", "valid", "dn_valid", 'img_shape', 'ori_shape'],
                     operations=compose_map_func, python_multiprocessing=python_multiprocessing,
                     num_parallel_workers=num_parallel_workers)
         # ds.project(["image", "mask", "boxes", "labels", "valid"])

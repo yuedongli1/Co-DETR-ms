@@ -178,6 +178,7 @@ class CoDinoTransformer(nn.Cell):
             inter_references_out,
             target_unact,
             ops.sigmoid(topk_coords_unact),
+            memory
         )
 
     def init_weights(self):

@@ -76,7 +76,8 @@ class TwoStageCriterion(SetCriterion):
             loss_values += loss_enc
 
         losses = {}
-        losses.update({k: v for k, v in zip(loss_names, loss_values)})
+        for k, v in zip(loss_names, loss_values):
+            losses[k] = v
         return losses
 
 
@@ -157,8 +158,9 @@ class DINOCriterion(TwoStageCriterion):
                 loss_aux = self.get_loss(aux_out, self.get_cdn_targets(aux_out, gt_label, gt_box, gt_valid, dn_valid))
                 # loss_names.extend([k + f"_{i}" for k in base_loss_names])
                 loss_values += loss_aux
-
-        losses = {k: v for k, v in zip(loss_names, loss_values)}
+        losses = {}
+        for k, v in zip(loss_names, loss_values):
+            losses[k] = v
         return losses
 
     def get_cdn_targets(self, outputs, tgt_labels, tgt_boxes, tgt_valids, dn_valids):

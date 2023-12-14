@@ -1,10 +1,7 @@
-import warnings
-import numpy as np
-
-from mindspore import ops
+from mindspore import ops, Tensor, nn
 
 
-class DeltaXYWHBBoxCoder:
+class DeltaXYWHBBoxCoder(nn.Cell):
     """Delta XYWH BBox coder.
 
     Following the practice in `R-CNN <https://arxiv.org/abs/1311.2524>`_,
@@ -31,8 +28,9 @@ class DeltaXYWHBBoxCoder:
                  clip_border=True,
                  add_ctr_clamp=False,
                  ctr_clamp=32):
-        self.means = target_means
-        self.stds = target_stds
+        super(DeltaXYWHBBoxCoder, self).__init__()
+        self.means = Tensor(target_means)
+        self.stds = Tensor(target_stds)
         self.clip_border = clip_border
         self.add_ctr_clamp = add_ctr_clamp
         self.ctr_clamp = ctr_clamp
@@ -50,12 +48,12 @@ class DeltaXYWHBBoxCoder:
             torch.Tensor: Box transformation deltas
         """
 
-        assert bboxes.size(0) == gt_bboxes.size(0)
-        assert bboxes.size(-1) == gt_bboxes.size(-1) == 4
+        assert bboxes.shape[0] == gt_bboxes.shape[0]
+        assert bboxes.shape[-1] == gt_bboxes.shape[-1] == 4
         encoded_bboxes = bbox2delta(bboxes, gt_bboxes, self.means, self.stds)
         return encoded_bboxes
 
-    def decode(self,
+    def construct(self,
                bboxes,
                pred_bboxes,
                max_shape=None,
@@ -80,9 +78,10 @@ class DeltaXYWHBBoxCoder:
             torch.Tensor: Decoded boxes.
         """
 
-        assert pred_bboxes.shape(0) == bboxes.shape(0)
+        assert pred_bboxes.shape[0] == bboxes.shape[0]
 
         assert pred_bboxes.ndim == 2
+        wh_ratio_clip = Tensor(wh_ratio_clip)
         # single image decode
         decoded_bboxes = delta2bbox(bboxes, pred_bboxes, self.means,
                                     self.stds, max_shape, wh_ratio_clip,
@@ -109,7 +108,7 @@ def bbox2delta(proposals, gt, means=(0., 0., 0., 0.), stds=(1., 1., 1., 1.)):
         Tensor: deltas with shape (N, 4), where columns represent dx, dy,
             dw, dh.
     """
-    assert proposals.size() == gt.size()
+    assert proposals.shape == gt.shape
 
     proposals = proposals.float()
     gt = gt.float()
@@ -129,8 +128,12 @@ def bbox2delta(proposals, gt, means=(0., 0., 0., 0.), stds=(1., 1., 1., 1.)):
     dh = ops.log(gh / ph)
     deltas = ops.stack([dx, dy, dw, dh], axis=-1)
 
-    means = deltas.new_tensor(means).unsqueeze(0)
-    stds = deltas.new_tensor(stds).unsqueeze(0)
+    means = ops.cast(means, deltas.dtype)
+    means = ops.stop_gradient(means).unsqueeze(0)
+
+    stds = ops.cast(stds, deltas.dtype)
+    stds = ops.stop_gradient(stds).unsqueeze(0)
+
     deltas = deltas.sub_(means).div_(stds)
 
     return deltas
@@ -196,27 +199,31 @@ def delta2bbox(rois,
                 [0.0000, 0.3161, 4.1945, 0.6839],
                 [5.0000, 5.0000, 5.0000, 5.0000]])
     """
-    num_bboxes, num_classes = deltas.size(0), deltas.size(1) // 4
+    num_bboxes, num_classes = deltas.shape[0], deltas.shape[1] // 4
     if num_bboxes == 0:
         return deltas
 
     deltas = deltas.reshape(-1, 4)
 
-    means = deltas.new_tensor(means).view(1, -1)
-    stds = deltas.new_tensor(stds).view(1, -1)
+    means = ops.cast(means, deltas.dtype)
+    means = ops.stop_gradient(means).view(1, -1)
+
+    stds = ops.cast(stds, deltas.dtype)
+    stds = ops.stop_gradient(stds).view(1, -1)
+
     denorm_deltas = deltas * stds + means
 
     dxy = denorm_deltas[:, :2]
     dwh = denorm_deltas[:, 2:]
 
     # Compute width/height of each roi
-    rois_ = rois.repeat(1, num_classes).reshape(-1, 4)
+    rois_ = rois.tile((1, num_classes)).reshape(-1, 4)
     pxy = ((rois_[:, :2] + rois_[:, 2:]) * 0.5)
     pwh = (rois_[:, 2:] - rois_[:, :2])
 
     dxy_wh = pwh * dxy
 
-    max_ratio = np.abs(np.log(wh_ratio_clip))
+    max_ratio = ops.abs(ops.log(wh_ratio_clip))
     if add_ctr_clamp:
         dxy_wh = ops.clamp(dxy_wh, max=ctr_clamp, min=-ctr_clamp)
         dwh = ops.clamp(dwh, max=max_ratio)

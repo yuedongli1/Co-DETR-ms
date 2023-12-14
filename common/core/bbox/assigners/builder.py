@@ -1,6 +1,8 @@
 from common.core.bbox.assigners.hungarian_assigner import HungarianAssigner
+from common.core.bbox.assigners.atss_assigner import ATSSAssigner
 
-assigner_types = {'HungarianAssigner': HungarianAssigner}
+assigner_types = {'HungarianAssigner': HungarianAssigner,
+                  'ATSSAssigner': ATSSAssigner}
 
 
 def build_assigner(cfg):

@@ -1,6 +1,8 @@
 from projects.heads.co_dino_head import CoDINOHead
+from projects.heads.co_atss_head import CoATSSHead
 
-head_types = {'CoDINOHead': CoDINOHead}
+head_types = {'CoDINOHead': CoDINOHead,
+              'CoATSSHead': CoATSSHead}
 
 
 def build_head(cfg):

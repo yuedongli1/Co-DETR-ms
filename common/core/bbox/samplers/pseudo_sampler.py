@@ -28,10 +28,10 @@ class PseudoSampler:
         Returns:
             :obj:`SamplingResult`: sampler results
         """
-        pos_inds = ops.nonzero(
-            assign_result.gt_inds > 0, as_tuple=False).squeeze(-1).unique()
-        neg_inds = ops.nonzero(
-            assign_result.gt_inds == 0, as_tuple=False).squeeze(-1).unique()
+        pos_inds = ops.unique(ops.nonzero(
+            assign_result.gt_inds > 0).squeeze(-1))
+        neg_inds = ops.unique(ops.nonzero(
+            assign_result.gt_inds == 0).squeeze(-1))
         gt_flags = bboxes.new_zeros(bboxes.shape[0], dtype=ms.uint8)
         sampling_result = SamplingResult(pos_inds, neg_inds, bboxes, gt_bboxes,
                                          assign_result, gt_flags)

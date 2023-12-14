@@ -70,9 +70,9 @@ class RandomHorizontalFlip(object):
             _, w, _ = img.shape
 
             target = target.copy()
-            boxes = target["boxes"]
+            boxes = target["boxes_xyxy"]
             boxes = boxes[:, [2, 1, 0, 3]] * np.array([-1, 1, -1, 1]) + np.array([w, 0, w, 0])
-            target["boxes"] = boxes
+            target["boxes_xyxy"] = boxes
         return img, target
 
 
@@ -112,9 +112,9 @@ class Resize(object):
         target = target.copy()
         # modify boxes
         ratio_width, ratio_height = float(nw)/float(w), float(nh)/float(h)
-        boxes = target['boxes']
+        boxes = target['boxes_xyxy']
         boxes = boxes * np.array([ratio_width, ratio_height, ratio_width, ratio_height])
-        target['boxes'] = boxes
+        target['boxes_xyxy'] = boxes
 
         # modify size
         target['size'] = (nh, nw)
@@ -166,15 +166,15 @@ class RandomSizeCrop(object):
 
         target = ori_target.copy()
         target["size"] = np.array([h, w])
-        bboxes = target['boxes']
+        bboxes = target['boxes_xyxy']
         max_size = np.array([w, h])
         cropped_boxes = bboxes - np.array([j, i, j, i])
         cropped_boxes = np.minimum(cropped_boxes.reshape(-1, 2, 2), max_size)
         cropped_boxes = cropped_boxes.clip(0)
-        target['boxes'] = cropped_boxes.reshape(-1, 4)
+        target['boxes_xyxy'] = cropped_boxes.reshape(-1, 4)
         keep = np.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], axis=1)
 
-        target['boxes'] = target['boxes'][keep]
+        target['boxes_xyxy'] = target['boxes_xyxy'][keep]
         target['labels'] = target['labels'][keep]
         if len(target['labels']) == 0:
             return img, ori_target
@@ -192,10 +192,10 @@ class Normalize(object):
         h, w, _ = image.shape
 
         target = target.copy()
-        boxes = target["boxes"]
-        boxes = box_xyxy_to_cxcywh(boxes)
-        boxes = boxes / np.array([w, h, w, h], dtype=np.float32)
-        target["boxes"] = boxes
+        boxes_xyxy = target["boxes_xyxy"]
+        boxes_xywh = box_xyxy_to_cxcywh(boxes_xyxy)
+        boxes_xywhn = boxes_xywh / np.array([w, h, w, h], dtype=np.float32)
+        target["boxes_xywhn"] = boxes_xywhn
         return image, target
 
 
@@ -217,15 +217,19 @@ class OutData(object):
         img, target = self.pad_func(img, target)
         img_data = img.transpose((2, 0, 1)).astype(np.float32)
         mask = target['mask']  # (max_size, max_size) 0 keep, 1 drop
+        img_shape = target['size']
+        ori_shape = target['ori_size']
         # c, h, w = img_data.shape
         # mask = np.zeros((h, w)).astype(np.float32)
         #
         if self.is_training:
-            boxes = target['boxes'].astype(np.float32)
+            boxes_xyxy = target['boxes_xyxy'].astype(np.float32)
+            boxes_xywhn = target['boxes_xywhn'].astype(np.float32)
             labels = target['labels'].astype(np.int32)
 
             box_num = len(labels)
-            gt_box = np.pad(boxes, ((0, self.pad_max_number - box_num), (0, 0)), mode="constant", constant_values=0)
+            gt_box_xyxy = np.pad(boxes_xyxy, ((0, self.pad_max_number - box_num), (0, 0)), mode="constant", constant_values=0)
+            gt_box_xywhn = np.pad(boxes_xywhn, ((0, self.pad_max_number - box_num), (0, 0)), mode="constant", constant_values=0)
             # default_boxes = np.array([[0.5, 0.5, 0.1, 0.1]]).repeat(self.pad_max_number - box_num, axis=0).astype(np.float32)
             # gt_box = np.concatenate([boxes, default_boxes])
             gt_label = np.pad(labels, (0, self.pad_max_number - box_num),
@@ -242,7 +246,7 @@ class OutData(object):
             dn_valid = np.zeros((self.num_dn,), dtype=np.bool_)
             end_index = self.num_dn-(self.num_dn%box_num) if box_num<self.num_dn else self.num_dn
             dn_valid[:end_index] = True
-            return img_data, mask, gt_box, gt_label, gt_valid, dn_valid
+            return img_data, mask, gt_box_xywhn, gt_box_xyxy, gt_label, gt_valid, dn_valid, img_shape, ori_shape
         else:
             image_id = target['image_id'].astype(np.int32)
             ori_size = np.array(target['ori_size'], dtype=np.int32)

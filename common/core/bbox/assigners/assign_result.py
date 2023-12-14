@@ -131,9 +131,9 @@ class AssignResult:
 
         if num_gts == 0:
             max_overlaps = ops.zeros(num_preds, dtype=ms.float32)
-            gt_inds = ops.zeros(num_preds, dtype=ms.int64)
+            gt_inds = ops.zeros(num_preds, dtype=ms.int32)
             if p_use_label is True or p_use_label < rng.rand():
-                labels = ops.zeros(num_preds, dtype=ms.int64)
+                labels = ops.zeros(num_preds, dtype=ms.int32)
             else:
                 labels = None
         else:
@@ -158,7 +158,7 @@ class AssignResult:
             is_ignore = Tensor(
                 rng.rand(num_preds) < p_ignore) & is_assigned
 
-            gt_inds = ops.zeros(num_preds, dtype=ops.int64)
+            gt_inds = ops.zeros(num_preds, dtype=ms.int32)
 
             true_idxs = np.arange(num_gts)
             rng.shuffle(true_idxs)
@@ -173,7 +173,7 @@ class AssignResult:
 
             if p_use_label is True or p_use_label < rng.rand():
                 if num_classes == 0:
-                    labels = ops.zeros(num_preds, dtype=ms.int64)
+                    labels = ops.zeros(num_preds, dtype=ms.int32)
                 else:
                     labels = Tensor(
                         # remind that we set FG labels to [0, num_class-1]
@@ -194,7 +194,7 @@ class AssignResult:
             gt_labels (torch.Tensor): Labels of gt boxes
         """
         self_inds = ops.arange(
-            1, len(gt_labels) + 1, dtype=ms.int64)
+            1, len(gt_labels) + 1, dtype=ms.int32)
         self.gt_inds = ops.cat([self_inds, self.gt_inds])
 
         self.max_overlaps = ops.cat(

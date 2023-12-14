@@ -1,3 +1,5 @@
+import mindspore as ms
+
 from common.models.losses.utils import weight_reduce_loss
 from mindspore import ops, nn
 
@@ -7,11 +9,12 @@ import warnings
 def binary_cross_entropy(pred,
                          label,
                          weight=None,
+                         class_weight=None,
                          reduction='mean',
                          avg_factor=None,
-                         class_weight=None,
                          ignore_index=-100,
-                         avg_non_ignore=False):
+                         avg_non_ignore=False,
+                         mask=None):
     """Calculate the binary CrossEntropy loss.
 
     Args:
@@ -38,51 +41,52 @@ def binary_cross_entropy(pred,
     # The default value of ignore_index is the same as F.cross_entropy
     ignore_index = -100 if ignore_index is None else ignore_index
 
-    if pred.dim() != label.dim():
+    if pred.ndim != label.ndim:
         label, weight, valid_mask = _expand_onehot_labels(
-            label, weight, pred.size(-1), ignore_index)
+            label, weight, pred.shape[-1], ignore_index)
     else:
         # should mask out the ignored elements
-        valid_mask = ((label >= 0) & (label != ignore_index)).float()
+        valid_mask = ops.logical_and(label >= 0, label != ignore_index).float()
         if weight is not None:
             # The inplace writing method will have a mismatched broadcast
             # shape error if the weight and valid_mask dimensions
             # are inconsistent such as (B,N,1) and (B,N,C).
-            weight = weight * valid_mask
+            weight = weight * valid_mask.astype(weight.dtype)
         else:
-            weight = valid_mask
+            weight = valid_mask.astype(pred.dtype)
 
     # average loss over non-ignored elements
     if (avg_factor is None) and avg_non_ignore and reduction == 'mean':
         avg_factor = valid_mask.sum().item()
 
     # weighted element-wise losses
-    weight = weight.float()
+    weight_ = ops.ones_like(weight)
     loss = ops.binary_cross_entropy_with_logits(
-        pred, label.float(), pos_weight=class_weight, reduction='none')
+        pred, label.float(), weight=weight_, pos_weight=class_weight, reduction='none')
     # do the reduction for the weighted loss
+    weight = weight.float()
     loss = weight_reduce_loss(
-        loss, weight, reduction=reduction, avg_factor=avg_factor)
+        loss, weight, reduction=reduction, avg_factor=avg_factor, mask=mask)
 
     return loss
 
 
 def _expand_onehot_labels(labels, label_weights, label_channels, ignore_index):
     """Expand onehot labels to match the size of prediction."""
-    bin_labels = labels.new_full((labels.size(0), label_channels), 0)
+    bin_labels = ops.full((labels.shape[0], label_channels), 0, labels.dtype)
+    bin_labels = ops.stop_gradient(bin_labels)
     valid_mask = (labels >= 0) & (labels != ignore_index)
     inds = ops.nonzero(
-        valid_mask & (labels < label_channels), as_tuple=False)
+        valid_mask & (labels < label_channels))
 
     if inds.numel() > 0:
         bin_labels[inds, labels[inds]] = 1
 
-    valid_mask = valid_mask.view(-1, 1).expand(labels.size(0),
-                                               label_channels).float()
+    valid_mask = valid_mask.view(-1, 1).broadcast_to((labels.shape[0], label_channels)).float()
     if label_weights is None:
         bin_label_weights = valid_mask
     else:
-        bin_label_weights = label_weights.view(-1, 1).repeat(1, label_channels)
+        bin_label_weights = label_weights.view(-1, 1).tile((1, label_channels))
         bin_label_weights *= valid_mask
 
     return bin_labels, bin_label_weights, valid_mask
@@ -97,7 +101,8 @@ class CrossEntropyLoss(nn.Cell):
                  class_weight=None,
                  ignore_index=None,
                  loss_weight=1.0,
-                 avg_non_ignore=False):
+                 avg_non_ignore=False,
+                 ):
         """CrossEntropyLoss.
 
         Args:
@@ -140,13 +145,14 @@ class CrossEntropyLoss(nn.Cell):
         s = f'avg_non_ignore={self.avg_non_ignore}'
         return s
 
-    def forward(self,
+    def construct(self,
                 cls_score,
                 label,
                 weight=None,
                 avg_factor=None,
                 reduction_override=None,
                 ignore_index=None,
+                mask=None,
                 **kwargs):
         """Forward function.
 
@@ -170,10 +176,10 @@ class CrossEntropyLoss(nn.Cell):
             ignore_index = self.ignore_index
 
         if self.class_weight is not None:
-            class_weight = cls_score.new_tensor(
-                self.class_weight, device=cls_score.device)
+            class_weight = ops.cast(self.class_weight, cls_score.dtype)
+            class_weight = ops.stop_gradient(class_weight)
         else:
-            class_weight = None
+            class_weight = ops.ones(cls_score.shape[-1], cls_score.dtype)
         loss_cls = self.loss_weight * self.cls_criterion(
             cls_score,
             label,
@@ -182,5 +188,6 @@ class CrossEntropyLoss(nn.Cell):
             reduction,
             avg_factor,
             ignore_index,
-            self.avg_non_ignore)
+            self.avg_non_ignore,
+            mask=mask)
         return loss_cls

@@ -1,22 +1,22 @@
 import os
 import yaml
 from datetime import datetime
+import numpy as np
 
 from mindspore.communication import init, get_rank, get_group_size
 
 import mindspore as ms
-from mindspore import nn, context, ParallelMode, ops
+from mindspore import nn, context, ParallelMode, ops, Tensor
 from mindspore.amp import DynamicLossScaler
 
 from common.dataset.dataset import create_mindrecord, create_detr_dataset
 from common.utils.utils import set_seed
-from common.utils.train_step import TrainOneStepWithGradClipLossScaleCell
 from config import config
 from projects.co_detr import build_co_detr
 
 if __name__ == '__main__':
     # set context, seed
-    context.set_context(mode=context.GRAPH_MODE, device_target='Ascend', pynative_synchronize=False)
+    context.set_context(mode=context.GRAPH_MODE, device_target='Ascend', pynative_synchronize=True)
     set_seed(0)
 
     if config.distributed:
@@ -42,15 +42,14 @@ if __name__ == '__main__':
     ds_size = dataset.get_dataset_size()
 
     # load pretrained model, only load backbone
-    config_file = './projects/configs/co_dino/co_dino_5scal_r50_1x_coco_train.yaml'
+    config_file = './projects/configs/co_dino/co_dino_5scal_r50_1x_coco.yaml'
     with open(config_file, 'r') as ifs:
         cfg = yaml.safe_load(ifs)
     co_detr = build_co_detr(cfg['model'])
-    # pretrain_dir = r"C:\02Data\models" if is_windows else '/home/zhouwuxing/DINO-ms/pretrained_model/'
-    # pretrain_path = os.path.join(pretrain_dir, "dino_resnet50_backbone.ckpt")
-    # pretrain_path = config.pretrain_path
-    # ms.load_checkpoint(pretrain_path, network, specify_prefix='backbone')
-    # print(f'successfully load checkpoint from {pretrain_path}')
+
+    pretrain_path = "./co_dino_query_bbox_head.ckpt"
+    ms.load_checkpoint(pretrain_path, co_detr)
+    print(f'successfully load checkpoint from {pretrain_path}')
 
     epoch_num = 12
 
@@ -87,8 +86,10 @@ if __name__ == '__main__':
 
     scaler = DynamicLossScaler(scale_value=2 ** 12, scale_factor=2, scale_window=1000)
 
-    def forward_func(*data):
-        loss = co_detr(*data)
+    def forward_func(
+            image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape, ori_shape):
+        loss = co_detr(
+            image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape, ori_shape)
         return scaler.scale(loss)
 
     grad_fn = ops.value_and_grad(forward_func, grad_position=None, weights=optimizer.parameters)
@@ -100,9 +101,60 @@ if __name__ == '__main__':
     last_step_time = start_time
     print(f'prepare finished, entering training loop')
     for e_id in range(epoch_num):
-        for s_id, in_data in enumerate(dataset.create_dict_iterator()):
+        for s_id, in_data in enumerate(dataset.create_dict_iterator(output_numpy=True)):
+            # image = Tensor(np.load('img.npy'))
+            # h, w = image.shape[-2:]
+            # mask = ops.zeros((1, h, w))
+            # labels_real = Tensor(np.load('gt_labels.npy'))
+            # labels = ops.full((1, 100), -1)
+            # labels[:, :4] = labels_real
+            #
+            # boxes_real = np.load('gt_bboxes.npy')
+            # boxes_xyxy = ops.full((1, 100, 4), 0., dtype=ms.float32)
+            # boxes_xyxy[:, :4, :] = Tensor(boxes_real)
+            #
+            # boxes_real = box_xyxy_to_cxcywh(boxes_real)
+            # boxes_real[:, [0, 2]] /= w
+            # boxes_real[:, [1, 3]] /= h
+            # boxes_real = Tensor(boxes_real)
+            # boxes_xywhn = ops.full((1, 100, 4), 0., dtype=ms.float32)
+            # boxes_xywhn[:, :4, :] = boxes_real
+            #
+            # valid = ops.zeros((1, 100,))
+            # valid[:, :4] = 1
+            # dn_valid = ops.ones((1, 100), dtype=ms.bool_)
+            # img_shape = (image.shape[-2:],)
+            # ori_shape = (image.shape[-2:],)
+            #
+            # feat0 = Tensor(np.load('feat0.npy'))
+            # feat1 = Tensor(np.load('feat1.npy'))
+            # feat2 = Tensor(np.load('feat2.npy'))
+            # feat3 = Tensor(np.load('feat3.npy'))
+            # feat4 = Tensor(np.load('feat4.npy'))
+            # feat5 = Tensor(np.load('feat5.npy'))
+
             # image, img_mask(1 for padl), gt_box, gt_label, gt_valid(True for valid)
-            loss, grads = grad_fn(in_data['image'], in_data['mask'], in_data['labels'], in_data['boxes'], in_data['valid'], in_data['dn_valid'])
+            image = Tensor(in_data['image'])
+            mask = Tensor(in_data['mask'])
+            labels = Tensor(in_data['labels'])
+            boxes_xywhn = Tensor(in_data['boxes_xywhn'])
+            boxes_xyxy = Tensor(in_data['boxes_xyxy'])
+            valid = Tensor(in_data['valid'])
+            dn_valid = Tensor(in_data['dn_valid'])
+            
+            img_shape_tuple = ()
+            ori_shape_tuple = ()
+            for img_shape in in_data['img_shape']:
+               img_shape_tuple += (tuple(img_shape.tolist()),)
+            for ori_shape in in_data['ori_shape']:
+               ori_shape_tuple += (tuple(ori_shape.tolist()),)
+
+            loss, grads = grad_fn(
+                image, mask, labels, boxes_xywhn, boxes_xyxy,
+                                  valid, dn_valid, img_shape_tuple, ori_shape_tuple)
+
+            # loss, grads = grad_fn(feat0, feat1, feat2, feat3, feat4, feat5,
+            #                     image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape, ori_shape)
 
             grads = ops.clip_by_global_norm(grads, clip_norm=0.1)
             loss = ops.depend(loss, optimizer(grads))
@@ -121,7 +173,6 @@ if __name__ == '__main__':
 
             # record in summary for mindinsight
             global_s_id = s_id + e_id * ds_size
-
             last_step_time = now
 
         # save checkpoint every epoch

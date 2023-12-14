@@ -132,10 +132,10 @@ def box_intersection(boxes1, boxes2) -> Tensor:
 
     # Caution:, be careful about the maximum operator. if the input is need broadcast, you'd better do it manually.
     # otherwise loss overflow or bankrupt may occur
-    lb = ops.maximum(ms_np.tile(boxes1[:, None, :2], (1, num_box2, 1)),
-                     ms_np.tile(boxes2[None, :, :2], (num_box1, 1, 1)))  # left bottom [N,M,2]
-    rt = ops.minimum(ms_np.tile(boxes1[:, None, 2:], (1, num_box2, 1)),
-                     ms_np.tile(boxes2[None, :, 2:], (num_box1, 1, 1)))  # right top [N,M,2]
+    lb = ops.maximum(ops.tile(boxes1[:, None, :2], (1, num_box2, 1)),
+                     ops.tile(boxes2[None, :, :2], (num_box1, 1, 1)))  # left bottom [N,M,2]
+    rt = ops.minimum(ops.tile(boxes1[:, None, 2:], (1, num_box2, 1)),
+                     ops.tile(boxes2[None, :, 2:], (num_box1, 1, 1)))  # right top [N,M,2]
 
     # this is the version that would cause loss overflow problem
     # lb = ops.maximum(boxes1[:, None, :2], boxes2[None, :, :2])  # left bottom [N,M,2]
@@ -170,8 +170,8 @@ def box_iou(boxes1, boxes2, eps=1e-6) -> Tuple:
 
     num_box1 = len(area1)
     num_box2 = len(area2)
-    bc_area1 = ms_np.tile(area1[:, None], (1, num_box2)) # (N, M)
-    bs_area2 = ms_np.tile(area2[None, :], (num_box1, 1)) # (N, M)
+    bc_area1 = ops.tile(area1[:, None], (1, num_box2)) # (N, M)
+    bs_area2 = ops.tile(area2[None, :], (num_box1, 1)) # (N, M)
 
     union = bc_area1 + bs_area2 - inter
 

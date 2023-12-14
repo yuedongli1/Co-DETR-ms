@@ -3,7 +3,7 @@ from common.core.bbox.transforms import generalized_box_iou
 from common.models.losses.utils import weight_reduce_loss
 
 
-def giou_loss(pred, target, weight=None, eps=1e-7, reduction='mean', avg_factor=None):
+def giou_loss(pred, target, weight=None, eps=1e-7, reduction='mean', avg_factor=None, mask=None):
     r"""`Generalized Intersection over Union: A Metric and A Loss for Bounding
     Box Regression <https://arxiv.org/abs/1902.09630>`_.
 
@@ -18,6 +18,7 @@ def giou_loss(pred, target, weight=None, eps=1e-7, reduction='mean', avg_factor=
     """
     gious = generalized_box_iou(pred, target, eps=eps)
     loss = 1 - gious
+    loss *= mask.astype(loss.dtype)
 
     if weight is not None:
         if weight.shape != loss.shape:
@@ -33,7 +34,7 @@ def giou_loss(pred, target, weight=None, eps=1e-7, reduction='mean', avg_factor=
                 assert weight.numel() == loss.numel()
                 weight = weight.view(loss.shape[0], -1)
         assert weight.ndim == loss.ndim
-    loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
+    loss = weight_reduce_loss(loss, weight, reduction, avg_factor, mask)
     return loss
 
 
@@ -51,11 +52,12 @@ class GIoULoss(nn.Cell):
                 weight=None,
                 avg_factor=None,
                 reduction_override=None,
+                mask=None,
                 **kwargs):
-        if weight is not None and not ops.any(weight > 0):
-            if pred.dim() == weight.dim() + 1:
-                weight = weight.unsqueeze(1)
-            return (pred * weight).sum()  # 0
+        # if weight is not None and not ops.any(weight > 0):
+        #     if pred.dim() == weight.dim() + 1:
+        #         weight = weight.unsqueeze(1)
+        #     return (pred * weight).sum()  # 0
         assert reduction_override in (None, 'none', 'mean', 'sum')
         reduction = (
             reduction_override if reduction_override else self.reduction)
@@ -71,5 +73,6 @@ class GIoULoss(nn.Cell):
             weight,
             self.eps,
             reduction,
-            avg_factor)
+            avg_factor,
+            mask)
         return loss

@@ -106,6 +106,10 @@ class CoDINOHead(nn.Cell):
 
         self.transformer.decoder.class_embed = self.class_embed
         self.transformer.decoder.bbox_embed = self.bbox_embed
+        self.downsample = nn.SequentialCell(
+            nn.Conv2d(embed_dim, embed_dim, kernel_size=3, stride=2, pad_mode='pad', padding=1),
+            nn.GroupNorm(32, embed_dim)
+        )
 
         for bbox_embed_layer in self.bbox_embed:
             bias_init_data = bbox_embed_layer.layers[-1].bias.data
@@ -164,7 +168,7 @@ class CoDINOHead(nn.Cell):
         query_embeds = (input_query_label, input_query_bbox)
 
         # feed into transformer
-        (inter_states, init_reference, inter_reference, enc_state, enc_reference) = self.transformer(
+        (inter_states, init_reference, inter_reference, enc_state, enc_reference, enc_outputs) = self.transformer(
             multi_level_feats,
             multi_level_masks,
             multi_level_position_embeddings,
@@ -222,8 +226,18 @@ class CoDINOHead(nn.Cell):
         output[2] = (interm_class, interm_coord)
 
         if self.training:
+            outs = []
+            num_level = len(multi_level_feats)
+            start = 0
+            for lvl in range(num_level):
+                bs, c, h, w = multi_level_feats[lvl].shape
+                end = start + h * w
+                feat = enc_outputs.permute(1, 0, 2)[start:end].permute(1, 2, 0)
+                start = end
+                outs.append(feat.reshape(bs, c, h, w))
+            outs.append(self.downsample(outs[-1]))
             loss = self.criterion(output, gt_label, gt_box, gt_valid, dn_valid)
-            return loss
+            return loss, outs
 
         return output[0]
 
@@ -272,13 +286,19 @@ class CoDINOHead(nn.Cell):
                    1] == num_dn, f"num_dn should be set as the same in dataset({dn_valids.shape[1]}) and model({num_dn})"
         bs, num_pad_box = tgt_labels.shape
         tgt_labels = replace_invalid(tgt_labels, tgt_valids, num_classes)
+        tgt_labels_expand = ops.full((bs, num_pad_box + 1), num_classes, dtype=tgt_labels.dtype)
+        tgt_labels_expand[:, :num_pad_box] = tgt_labels
+        
+        tgt_boxes_expand = ops.full((bs, num_pad_box + 1, 4), 0, dtype=tgt_boxes.dtype)
+        tgt_boxes_expand[:, :num_pad_box, :] = tgt_boxes
+        
         num_valid_box = ops.reduce_sum(tgt_valids.astype(ms.float32), 1).astype(ms.int32)  # (bs)
 
         dn_positive_ids = ops.expand_dims(ms_np.arange(num_dn), 0) % num_valid_box.expand_dims(1)  # (bs, num_dn)
         dn_positive_ids = replace_invalid(dn_positive_ids, dn_valids, num_pad_box)  # 012 012 012 -1
-
-        known_labels = ops.gather_elements(tgt_labels, 1, dn_positive_ids)  # (bs, num_dn)
-        known_boxes = ops.gather_elements(tgt_boxes, 1, ms_np.tile(ops.expand_dims(dn_positive_ids, -1), (1, 1, 4)))
+        
+        known_labels = ops.gather_elements(tgt_labels_expand, 1, dn_positive_ids)  # (bs, num_dn)
+        known_boxes = ops.gather_elements(tgt_boxes_expand, 1, ms_np.tile(ops.expand_dims(dn_positive_ids, -1), (1, 1, 4)))
 
         # add negative query
         num_cdn = num_dn * 2

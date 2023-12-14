@@ -61,11 +61,13 @@ def unmap(data, count, inds, fill=0):
     """Unmap a subset of item (data) back to the original set of items (of size
     count)"""
     if data.dim() == 1:
-        ret = data.new_full((count, ), fill)
+        ret = ops.full((count,), fill, dtype=data.dtype)
+        ret = ops.stop_gradient(ret)
         ret[inds.type(ms.bool_)] = data
     else:
-        new_size = (count, ) + data.size()[1:]
-        ret = data.new_full(new_size, fill)
+        new_size = (count, ) + data.shape[1:]
+        ret = ops.full(new_size, fill, dtype=data.dtype)
+        ret = ops.stop_gradient(ret)
         ret[inds.type(ms.bool_), :] = data
     return ret
 

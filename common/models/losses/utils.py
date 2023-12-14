@@ -17,7 +17,7 @@ def reduce_loss(loss, reduction):
         return loss.sum()
 
 
-def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
+def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None, mask=None):
     """Apply element-wise weight and reduce loss.
 
     Args:
@@ -32,6 +32,9 @@ def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
     # if weight is specified, apply element-wise weight
     if weight is not None:
         loss = loss * weight
+    
+    if mask is not None:
+        loss = loss * mask.astype(loss.dtype)
 
     # if avg_factor is not specified, just reduce the loss
     if avg_factor is None:

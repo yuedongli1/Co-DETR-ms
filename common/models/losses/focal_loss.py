@@ -3,7 +3,7 @@ from common.models.losses.utils import weight_reduce_loss
 
 
 def sigmoid_focal_loss(inputs, targets, weight=None,
-                       alpha: float = 0.25, gamma: float = 2, reduction='mean', avg_factor=None):
+                       alpha: float = 0.25, gamma: float = 2, reduction='mean', avg_factor=None, mask=None):
     """
     Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
 
@@ -22,17 +22,17 @@ def sigmoid_focal_loss(inputs, targets, weight=None,
         torch.Tensor: The computed sigmoid focal loss.
     """
     prob = ops.sigmoid(inputs)
-    _, _, num_class = inputs.shape
+    num_class = inputs.shape[-1]
     weight_ = ops.ones(num_class, inputs.dtype)
     pos_weight = ops.ones(num_class, inputs.dtype)
-    ce_loss = ops.binary_cross_entropy_with_logits(inputs, targets,
+    ce_loss = ops.binary_cross_entropy_with_logits(inputs, targets[:, None].tile((1, num_class)),
                                                    weight=weight_, pos_weight=pos_weight, reduction="none")
-    p_t = prob * targets + (1 - prob) * (1 - targets)
+    p_t = prob * targets[:, None] + (1 - prob) * (1 - targets[:, None])
     loss = ce_loss * ((1 - p_t) ** gamma)
 
     if alpha >= 0:
         alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
-        loss = alpha_t * loss
+        loss = loss * alpha_t[:, None]
 
     if weight is not None:
         if weight.shape != loss.shape:
@@ -48,7 +48,7 @@ def sigmoid_focal_loss(inputs, targets, weight=None,
                 assert weight.numel() == loss.numel()
                 weight = weight.view(loss.shape[0], -1)
         assert weight.ndim == loss.ndim
-    loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
+    loss = weight_reduce_loss(loss, weight, reduction, avg_factor, mask)
     return loss
 
 
@@ -90,7 +90,8 @@ class FocalLoss(nn.Cell):
     def construct(self,
                 pred,
                 target,
-                weight=None,):
+                weight=None,
+                avg_factor=None):
         """Forward function.
 
         Args:
@@ -113,5 +114,6 @@ class FocalLoss(nn.Cell):
             target,
             weight,
             self.alpha,
-            self.gamma)
+            self.gamma,
+            avg_factor=avg_factor)
         return loss_cls
