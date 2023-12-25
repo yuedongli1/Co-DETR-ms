@@ -72,7 +72,7 @@ class MultiScaleDeformableAttention(nn.Cell):
         self.value_proj = nn.Dense(embed_dim, embed_dim)
         self.output_proj = nn.Dense(embed_dim, embed_dim)
 
-        self.init_weights()
+        # self.init_weights()
 
     def init_weights(self):
         """
