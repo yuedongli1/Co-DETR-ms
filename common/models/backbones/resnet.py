@@ -324,7 +324,7 @@ class ResNet(nn.Cell):
 
         return out_layers
 
-    def construct(self, x: Tensor) -> Tuple:
+    def construct(self, x, img_masks=None) -> Tuple:
         x = self.forward_features(x)
         return x
 

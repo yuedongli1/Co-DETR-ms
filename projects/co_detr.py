@@ -39,8 +39,7 @@ class CoDETR(nn.Cell):
     def construct(self, images, img_masks, gt_label=None, gt_box=None, gt_valid=None, dn_valid=None):
         batch_size, _, h, w = images.shape
         # extract features with backbone
-        # features = self.backbone(images)
-        features, masks = self.backbone(images, img_masks) # swin_transformer
+        features = self.backbone(images, img_masks)
 
         multi_level_feats = self.neck(features)  # list[b, embed_dim, h, w], len=num_level
         output = self.query_head(multi_level_feats, images, img_masks, gt_label, gt_box, gt_valid, dn_valid)

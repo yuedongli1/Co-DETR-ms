@@ -652,7 +652,7 @@ class SwinTransformer(nn.Cell):
         x = x.flatten(start_dim=2).swapaxes(1, 2)
         x = self.pos_drop(x)
 
-        outs = []
+        outs = ()
         for i in range(self.num_layers):
             layer = self.layers[i]
             x_out, H, W, x, Wh, Ww = layer(x)
@@ -662,18 +662,9 @@ class SwinTransformer(nn.Cell):
                 x_out = norm_layer(x_out)
 
                 out = x_out.view(self.batch_size, H, W, self.num_features[i]).permute(0, 3, 1, 2)
-                outs.append(out)
-        #
-        # collect for nesttensors
-        out_tensors = ()
-        out_masks = ()
-        for idx, out_i in enumerate(outs):
-            assert m is not None
-            mask = ops.interpolate(m[None].float(), size=out_i.shape[-2:]).bool()[0]
-            out_tensors += (out_i,)
-            out_masks += (mask,)
+                outs += (out,)
 
-        return out_tensors, out_masks
+        return outs
 
     def train(self, mode=True):
         """Convert the model into training mode while keep layers freezed."""
