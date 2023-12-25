@@ -199,7 +199,7 @@ def preprocess_fn(args, image_id, image, image_anno_dict, is_training):
     else:
         trans = transform.Compose([
             # resize image, boxes value updated
-            transform.Resize(size=800, max_size=args.max_size),
+            transform.Resize(size=1280, max_size=args.max_size),
             # normalize both image and boxes(0,1 value with respect to the valid HW)
             transform.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
