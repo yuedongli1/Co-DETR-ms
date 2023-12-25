@@ -84,22 +84,27 @@ def get_size_with_aspect_ratio(image_size, size, max_size=None):
         max_original_size = float(max((w, h)))
         if max_original_size / min_original_size * size > max_size:
             size = int(max_size * min_original_size / max_original_size)
+        if (w <= h and w == size) or (h <= w and h == size):
+            return h, w
 
-    if (w <= h and w == size) or (h <= w and h == size):
-        return h, w
+        if w < h:
+            ow = size
+            oh = int(size * h / w)
+        else:
+            oh = size
+            ow = int(size * w / h)
 
-    if w < h:
-        ow = size
-        oh = int(size * h / w)
+        return oh, ow
     else:
-        oh = size
-        ow = int(size * w / h)
-
-    return oh, ow
+        max_long_edge = max(size)
+        max_short_edge = min(size)
+        scale_factor = min(max_long_edge / max(h, w),
+                           max_short_edge / min(h, w))
+        return int(h * scale_factor), int(w * scale_factor)
 
 
 class Resize(object):
-    def __init__(self, max_size, size=None):
+    def __init__(self, size, max_size=None):
         self.size = size
         self.max_size = max_size
 
@@ -107,7 +112,7 @@ class Resize(object):
         h, w, _ = img.shape
 
         nh, nw = get_size_with_aspect_ratio(img.shape, self.size, self.max_size)
-        resize_pad_img = cv2.resize(img, (nw, nh), cv2.INTER_CUBIC)
+        resize_pad_img = cv2.resize(img, (nw, nh), cv2.INTER_LINEAR)
 
         target = target.copy()
         # modify boxes
@@ -141,9 +146,9 @@ class Pad(object):
     def __call__(self, img, target):
         h, w, c = img.shape
         new_img = np.zeros((self.tgt_h, self.tgt_w, c), dtype=np.float32)
-        new_img[:h, :w, :] = img
+        new_img[:min(h, self.tgt_h), :min(w, self.tgt_w), :] = img[:min(h, self.tgt_h), :min(w, self.tgt_w), :]
         new_mask = np.ones((self.tgt_h, self.tgt_w), dtype=np.float32)
-        new_mask[:h, :w] = 0
+        new_mask[:min(h, self.tgt_h), :min(w, self.tgt_w)] = 0
         target['mask'] = new_mask
         target['size'] = (self.tgt_h, self.tgt_w)
         return new_img, target
@@ -205,11 +210,12 @@ class OutData(object):
     Returns:
         padded image, padded gt and their masks
     """
-    def __init__(self, is_training=True, max_size=1333, pad_label=-1, num_dn=10):
+    def __init__(self, is_training=True, size=(2048, 1280), max_size=1333, pad_label=-1, num_dn=10):
         self.is_training = is_training
         self.pad_max_number = 100
         self.pad_label = pad_label
         self.pad_func = Pad(max_size, max_size)
+        # self.pad_func = Pad(size[1], size[0])
         self.num_dn = num_dn
 
     def __call__(self, img, target):

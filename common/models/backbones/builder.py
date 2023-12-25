@@ -1,6 +1,8 @@
 from common.models.backbones.resnet import ResNet
+from common.models.backbones.swin_transformer import SwinTransformer
 
-backbone_types = {'ResNet': ResNet}
+backbone_types = {'ResNet': ResNet,
+                  'SwinTransformer': SwinTransformer}
 
 
 def build_backbone(cfg):

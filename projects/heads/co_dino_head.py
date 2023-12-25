@@ -107,7 +107,7 @@ class CoDINOHead(nn.Cell):
         self.transformer.decoder.class_embed = self.class_embed
         self.transformer.decoder.bbox_embed = self.bbox_embed
         self.downsample = nn.SequentialCell(
-            nn.Conv2d(embed_dim, embed_dim, kernel_size=3, stride=2, pad_mode='pad', padding=1),
+            nn.Conv2d(embed_dim, embed_dim, kernel_size=3, stride=2, pad_mode='pad', padding=1, has_bias=True),
             nn.GroupNorm(32, embed_dim)
         )
 

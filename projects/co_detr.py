@@ -36,16 +36,17 @@ class CoDETR(nn.Cell):
         """bool: whether the detector has a RoI head"""
         return hasattr(self, 'bbox_head') and self.bbox_head is not None
 
-    def construct_(self, images, img_masks, gt_label=None, gt_box=None, gt_valid=None, dn_valid=None):
+    def construct(self, images, img_masks, gt_label=None, gt_box=None, gt_valid=None, dn_valid=None):
         batch_size, _, h, w = images.shape
         # extract features with backbone
-        features = self.backbone(images)
+        # features = self.backbone(images)
+        features, masks = self.backbone(images, img_masks) # swin_transformer
 
         multi_level_feats = self.neck(features)  # list[b, embed_dim, h, w], len=num_level
         output = self.query_head(multi_level_feats, images, img_masks, gt_label, gt_box, gt_valid, dn_valid)
         return output
 
-    def construct(self,
+    def construct_(self,
                   images, img_masks, gt_label=None, boxes_xywhn=None, boxes_xyxy=None, gt_valid=None, dn_valid=None, img_shape=None, ori_shape=None):
         query_loss, bbox_loss = 0.0, 0.0
         batch_size, _, h, w = images.shape

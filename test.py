@@ -4,6 +4,7 @@ from typing import Dict
 
 import cv2
 import mindspore as ms
+# ms.set_context(save_graphs=True, save_graphs_path='./')
 import numpy as np
 from mindspore import ops, Tensor, set_seed
 import mindspore.numpy as ms_np
@@ -67,6 +68,7 @@ def inference(model, image, mask, ori_size, num_select=300, test_cfg=None):
     scores, labels, boxes = select_from_prediction(box_cls, box_pred, ori_size, num_select, test_cfg)
 
     return scores, labels, boxes
+    # return output
 
 
 def visualize(pred_dict: Dict, coco_gt: COCO, save_dir, raw_dir):
@@ -111,12 +113,19 @@ def coco_evaluate(model, eval_dateset, eval_anno_path, test_cfg, save_dir, raw_d
     ds_size = dataset.get_dataset_size()
     i = 0
     current_start_time = time.time()
-    for data in tqdm(eval_dateset.create_dict_iterator(), total=ds_size, desc=f'inferring...'):
+    # profiler = ms.Profiler(start_profile=False)
+    for i, data in enumerate(tqdm(eval_dateset.create_dict_iterator(), total=ds_size, desc=f'inferring...')):
+        # if i == 1:
+        #     profiler.start()
+        # if i == 4:
+        #     profiler.stop()
+        #     break
         image_id = data['image_id'].asnumpy()  # (bs, )
         image = data['image']  # (bs, c, h, w)
         mask = data['mask']  # (bs, h, w)
         size_wh = data['ori_size'][:, ::-1]  # (bs, 2), in wh order
         scores, labels, boxes = inference(model, image, mask, size_wh, num_select, test_cfg)
+        # output = inference(model, image, mask, size_wh, num_select, test_cfg)
         cat_ids = Tensor(np.vectorize(coco_clsid_to_catid.get)(labels.asnumpy()))
         res = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, cat_ids, boxes)]
         img_res = {int(idx): output for idx, output in zip(image_id, res)}
@@ -124,6 +133,7 @@ def coco_evaluate(model, eval_dateset, eval_anno_path, test_cfg, save_dir, raw_d
         # visualize(img_res, coco_gt, save_dir, raw_dir)
         print(f'current image cost time: {time.time() - current_start_time}s', )
         current_start_time = time.time()
+    # profiler.analyse()
 
     coco_evaluator.synchronize_between_processes()
     coco_evaluator.accumulate()
@@ -136,21 +146,23 @@ def coco_evaluate(model, eval_dateset, eval_anno_path, test_cfg, save_dir, raw_d
 if __name__ == '__main__':
     # set context
     ms.set_context(mode=ms.GRAPH_MODE, device_target='Ascend',
-                   pynative_synchronize=False)
+                   pynative_synchronize=False, max_call_depth=2000)
     rank = 0
     device_num = 1
     set_seed(0)
 
-    config_file = './projects/configs/co_dino/co_dino_5scal_r50_1x_coco.yaml'
+    config_file = './projects/configs/co_dino/co_dino_5scale_swin_large_16e_o365tococo.yaml'
+    # config_file = './projects/configs/co_dino/co_dino_5scal_r50_1x_coco.yaml'
     with open(config_file, 'r') as ifs:
         cfg = yaml.safe_load(ifs)
     eval_model = build_co_detr(cfg['model'])
     eval_model.set_train(False)
 
-    model_path = './co_dino_from_torch.ckpt'
+    model_path = './co_dino_5scale_swin_large.ckpt'
+    # model_path = './co_dino_query_bbox_head.ckpt'
     ms.load_checkpoint(model_path, eval_model)
 
-    ms.amp.auto_mixed_precision(eval_model, amp_level='O2')
+    ms.amp.auto_mixed_precision(eval_model, amp_level='O0')
 
     # evaluate coco
     mindrecord_file = create_mindrecord(config, rank, "DETR.mindrecord.eval", False)

@@ -2,14 +2,20 @@
 model:
     type: 'CoDETR'
     backbone:
-        type: 'ResNet'
-        depth: 50
-        out_layers: ["res2", "res3", "res4", "res5"]
-        frozen_stages: 1
-        norm: 'FrozenBN'
+        type: 'SwinTransformer'
+        batch_size: 1
+        img_size: [1536, 1536]
+        embed_dim: 192
+        depths: [2, 2, 18, 2]
+        num_heads: [6, 12, 24, 48]
+        out_indices: [0, 1, 2, 3]
+        window_size: 12
+        ape: False
+        drop_path_rate: 0.3
+        patch_norm: True
     neck:
         type: 'ChannelMapper'
-        input_channels: {"res2": 256, "res3": 512, "res4": 1024, "res5": 2048}
+        input_channels: {"res2": 192, "res3": 384, "res4": 768, "res5": 1536}
         in_features: ["res2", "res3", "res4", "res5"]
         kernel_size: 1
         bias: False
@@ -21,9 +27,9 @@ model:
         embed_dim: 256
         num_queries: 900
         num_classes: 80
-        num_dn: 100
+        num_dn: 500
         label_noise_ratio: 0.5
-        box_noise_scale: 1.0
+        box_noise_scale: 0.4
         transformer:
             type: 'CoDinoTransformer'
             num_feature_levels: 5
