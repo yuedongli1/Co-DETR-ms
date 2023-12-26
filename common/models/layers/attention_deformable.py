@@ -242,9 +242,13 @@ def multi_scale_deformable_attn(
         sampling_grid_l_ = sampling_grids[:, :, :, level].transpose((0, 2, 1, 3, 4)).reshape(
             bs * num_heads, num_queries, num_points, 2)
         # bs*num_heads, head_embed_dims, num_queries, num_points
-        sampling_value_l_ = ops.grid_sample(
-            value_l_, sampling_grid_l_, mode="bilinear", padding_mode="zeros", align_corners=False
+        # sampling_value_l_ = ops.grid_sample(
+        #     value_l_, sampling_grid_l_, mode="bilinear", padding_mode="zeros", align_corners=False
+        # )
+        sampling_value_l_ = bilinear_grid_sample(
+            value_l_, sampling_grid_l_, align_corners=False
         )
+
         sampling_value_list.append(sampling_value_l_)
     # (bs, num_queries, num_heads, num_levels, num_points) ->s
     # (bs, num_heads, num_queries, num_levels, num_points) ->
@@ -265,3 +269,81 @@ def multi_scale_deformable_attn(
     )
     # (bs, num_queries, embed_dims)  embed_dims = num_heads*head_embed_dims
     return output.transpose((0, 2, 1))
+
+
+def bilinear_grid_sample(im: Tensor,
+                         grid: Tensor,
+                         align_corners: bool = False) -> Tensor:
+    """Given an input and a flow-field grid, computes the output using input
+    values and pixel locations from grid. Supported only bilinear interpolation
+    method to sample the input pixels.
+
+    Args:
+        im (torch.Tensor): Input feature map, shape (N, C, H, W)
+        grid (torch.Tensor): Point coordinates, shape (N, Hg, Wg, 2)
+        align_corners (bool): If set to True, the extrema (-1 and 1) are
+            considered as referring to the center points of the input’s
+            corner pixels. If set to False, they are instead considered as
+            referring to the corner points of the input’s corner pixels,
+            making the sampling more resolution agnostic.
+
+    Returns:
+        torch.Tensor: A tensor with sampled points, shape (N, C, Hg, Wg)
+    """
+    n, c, h, w = im.shape
+    gn, gh, gw, _ = grid.shape
+    assert n == gn
+
+    x = grid[:, :, :, 0]
+    y = grid[:, :, :, 1]
+
+    if align_corners:
+        x = ((x + 1) / 2) * (w - 1)
+        y = ((y + 1) / 2) * (h - 1)
+    else:
+        x = ((x + 1) * w - 1) / 2
+        y = ((y + 1) * h - 1) / 2
+
+    x = x.view(n, -1)
+    y = y.view(n, -1)
+
+    x0 = ops.floor(x).long()
+    y0 = ops.floor(y).long()
+    x1 = x0 + 1
+    y1 = y0 + 1
+
+    wa = ((x1 - x) * (y1 - y)).unsqueeze(1)
+    wb = ((x1 - x) * (y - y0)).unsqueeze(1)
+    wc = ((x - x0) * (y1 - y)).unsqueeze(1)
+    wd = ((x - x0) * (y - y0)).unsqueeze(1)
+
+    # Apply default for grid_sample function zero padding
+    im_padded = ms_np.pad(im, pad_width=[1, 1, 1, 1], mode='constant', constant_values=0)
+    padded_h = h + 2
+    padded_w = w + 2
+    # save points positions after padding
+    x0, x1, y0, y1 = x0 + 1, x1 + 1, y0 + 1, y1 + 1
+
+    # Clip coordinates to padded image size
+    x0 = ops.where(x0 < 0, Tensor(0), x0)
+    x0 = ops.where(x0 > padded_w - 1, Tensor(padded_w - 1), x0)
+    x1 = ops.where(x1 < 0, Tensor(0), x1)
+    x1 = ops.where(x1 > padded_w - 1, Tensor(padded_w - 1), x1)
+    y0 = ops.where(y0 < 0, Tensor(0), y0)
+    y0 = ops.where(y0 > padded_h - 1, Tensor(padded_h - 1), y0)
+    y1 = ops.where(y1 < 0, Tensor(0), y1)
+    y1 = ops.where(y1 > padded_h - 1, Tensor(padded_h - 1), y1)
+
+    im_padded = im_padded.view(n, c, -1)
+
+    x0_y0 = (x0 + y0 * padded_w).unsqueeze(1).broadcast_to((-1, c, -1))
+    x0_y1 = (x0 + y1 * padded_w).unsqueeze(1).broadcast_to((-1, c, -1))
+    x1_y0 = (x1 + y0 * padded_w).unsqueeze(1).broadcast_to((-1, c, -1))
+    x1_y1 = (x1 + y1 * padded_w).unsqueeze(1).broadcast_to((-1, c, -1))
+
+    Ia = ops.gather_elements(im_padded, 2, x0_y0)
+    Ib = ops.gather_elements(im_padded, 2, x0_y1)
+    Ic = ops.gather_elements(im_padded, 2, x1_y0)
+    Id = ops.gather_elements(im_padded, 2, x1_y1)
+
+    return (Ia * wa + Ib * wb + Ic * wc + Id * wd).reshape(n, c, gh, gw)
