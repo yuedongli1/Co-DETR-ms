@@ -78,41 +78,85 @@ model:
             gamma: 2.0
             two_stage_binary_cls: False
             num_dn: 100
-    bbox_head:
-        type: 'CoATSSHead'
-        num_classes: 80
-        in_channels: 256
-        stacked_convs: 1
-        feat_channels: 256
-        anchor_generator:
-            type: 'AnchorGenerator'
-            ratios: [1.0]
-            octave_base_scale: 8
-            scales_per_octave: 1
-            strides: [4, 8, 16, 32, 64, 128]
-        bbox_coder:
-            type: 'DeltaXYWHBBoxCoder'
-            target_means: [.0, .0, .0, .0]
-            target_stds: [0.1, 0.1, 0.2, 0.2]
-        loss_cls:
-            type: 'FocalLoss'
-            use_sigmoid: True
-            gamma: 2.0
-            alpha: 0.25
-            loss_weight: 12.0
-        loss_bbox:
-            type: 'GIoULoss'
-            loss_weight: 24.0
-        loss_centerness:
-            type: 'CrossEntropyLoss'
-            use_sigmoid: True
-            loss_weight: 12.0
-        assigner:
-            type: 'ATSSAssigner'
-            topk: 9
-        train_cfg:
-            allowed_border: -1
-            pos_weight: -1.
+#    bbox_head:
+#        type: 'CoATSSHead'
+#        num_classes: 80
+#        in_channels: 256
+#        stacked_convs: 1
+#        feat_channels: 256
+#        anchor_generator:
+#            type: 'AnchorGenerator'
+#            ratios: [1.0]
+#            octave_base_scale: 8
+#            scales_per_octave: 1
+#            strides: [4, 8, 16, 32, 64, 128]
+#        bbox_coder:
+#            type: 'DeltaXYWHBBoxCoder'
+#            target_means: [.0, .0, .0, .0]
+#            target_stds: [0.1, 0.1, 0.2, 0.2]
+#        loss_cls:
+#            type: 'FocalLoss'
+#            use_sigmoid: True
+#            gamma: 2.0
+#            alpha: 0.25
+#            loss_weight: 12.0
+#        loss_bbox:
+#            type: 'GIoULoss'
+#            loss_weight: 24.0
+#        loss_centerness:
+#            type: 'CrossEntropyLoss'
+#            use_sigmoid: True
+#            loss_weight: 12.0
+#        assigner:
+#            type: 'ATSSAssigner'
+#            topk: 9
+#        train_cfg:
+#            allowed_border: -1
+#            pos_weight: -1.
+#    rpn_head:
+#        type: 'RPNHead'
+#        in_channel: 256
+#        feat_channel: 256
+#        anchor_generator:
+#            type: 'AnchorGenerator'
+#            ratios: [0.5, 1.0, 2.0]
+#            octave_base_scale: 4
+#            scales_per_octave: 3
+#            strides: [4, 8, 16, 32, 64, 128]
+#        proposal_generator:
+#            type: 'ProposalGenerator'
+#            nms_thresh: 0.7
+#            min_size: 0.0
+#            pre_nms_top_n: 2000
+#            post_nms_top_n: 1000
+#        label_assigner:
+#            type: 'RPNLabelAssignment'
+#            rpn_sample_batch: 256
+#            fg_fraction: 0.5
+#            negative_overlap: 0.3
+#            positive_overlap: 0.7
+#            use_random: True
+#    roi_head:
+#        type: 'ROIHead'
+#        roi_extractor:
+#            type: 'RoIExtractor'
+#            resolution: 7
+#            finest_scale: 56
+#            featmap_strides: [4, 8, 16, 32, 64]
+#        bbox_head:
+#            type: 'RCNNBBoxTwoFCHead'
+#            in_channel: 256
+#            out_channel: 1024
+#            resolution: 7
+#        bbox_assigner:
+#            type: 'BBoxAssigner'
+#            rois_per_batch: 512
+#            bg_thresh: 0.5
+#            fg_thresh: 0.5
+#            fg_fraction: 0.25
+
+
+
 test_cfg:
     nms_type: 'soft_nms'
     iou_threshold: 0.8

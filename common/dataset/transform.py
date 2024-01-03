@@ -84,23 +84,18 @@ def get_size_with_aspect_ratio(image_size, size, max_size=None):
         max_original_size = float(max((w, h)))
         if max_original_size / min_original_size * size > max_size:
             size = int(max_size * min_original_size / max_original_size)
-        if (w <= h and w == size) or (h <= w and h == size):
-            return h, w
 
-        if w < h:
-            ow = size
-            oh = int(size * h / w)
-        else:
-            oh = size
-            ow = int(size * w / h)
+    if (w <= h and w == size) or (h <= w and h == size):
+        return h, w
 
-        return oh, ow
+    if w < h:
+        ow = size
+        oh = int(size * h / w)
     else:
-        max_long_edge = max(size)
-        max_short_edge = min(size)
-        scale_factor = min(max_long_edge / max(h, w),
-                           max_short_edge / min(h, w))
-        return int(h * scale_factor), int(w * scale_factor)
+        oh = size
+        ow = int(size * w / h)
+
+    return oh, ow
 
 
 class Resize(object):

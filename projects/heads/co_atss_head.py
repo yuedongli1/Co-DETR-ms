@@ -2,12 +2,9 @@ import mindspore as ms
 import mindspore.nn as nn
 
 from mindspore import Tensor, ops
-from mindspore.communication.management import get_group_size, init
 
-from common.utils.dist import reduce_mean
-from common.utils.misc import multi_apply, unmap
 from common.models.layers.conv import ConvNormAct
-from common.core.anchor.utils import images_to_levels, anchor_inside_flags
+from common.core.anchor.utils import images_to_levels
 from common.core.bbox.coder.builder import build_bbox_coder
 from common.core.bbox.assigners.builder import build_assigner
 from common.models.losses.builder import build_loss
@@ -581,7 +578,7 @@ class CoATSSHead(nn.Cell):
         return cls_scores, bbox_preds, centernesses
 
     def construct(self,
-                      feat0, feat1, feat2, feat3, feat4, feat5,
+                      x,
                       img_shapes,
                       gt_bboxes,
                       gt_labels=None,
@@ -606,7 +603,6 @@ class CoATSSHead(nn.Cell):
                 losses: (dict[str, Tensor]): A dictionary of loss components.
                 proposal_list (list[Tensor]): Proposals of each image.
         """
-        x = (feat0, feat1, feat2, feat3, feat4, feat5)
         cls_scores, bbox_preds, centernesses = self.forward(x)
         featmap_sizes = [featmap.shape[2:] for featmap in cls_scores]
         losses = self.loss(cls_scores, bbox_preds, centernesses, gt_bboxes, gt_labels, gt_valids, img_shapes, featmap_sizes, gt_bboxes_ignore=None)

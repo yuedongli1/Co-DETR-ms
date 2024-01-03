@@ -9,6 +9,7 @@ import mindspore as ms
 from mindspore import nn, context, ParallelMode, ops, Tensor
 from mindspore.amp import DynamicLossScaler
 
+from common.dataset.transform import box_xyxy_to_cxcywh
 from common.dataset.dataset import create_mindrecord, create_detr_dataset
 from common.utils.utils import set_seed
 from config import config
@@ -16,7 +17,8 @@ from projects.co_detr import build_co_detr
 
 if __name__ == '__main__':
     # set context, seed
-    context.set_context(mode=context.GRAPH_MODE, device_target='Ascend', pynative_synchronize=True)
+    context.set_context(mode=context.PYNATIVE_MODE, device_target='Ascend', pynative_synchronize=False,
+                        max_call_depth=2000)
     set_seed(0)
 
     if config.distributed:
@@ -42,12 +44,14 @@ if __name__ == '__main__':
     ds_size = dataset.get_dataset_size()
 
     # load pretrained model, only load backbone
-    config_file = './projects/configs/co_dino/co_dino_5scal_r50_1x_coco.yaml'
+    config_file = './projects/configs/co_dino/co_dino_5scale_swin_large_16e_o365tococo.yaml'
+    # config_file = './projects/configs/co_dino/co_dino_5scal_r50_1x_coco.yaml'
     with open(config_file, 'r') as ifs:
         cfg = yaml.safe_load(ifs)
     co_detr = build_co_detr(cfg['model'])
 
-    pretrain_path = "./co_dino_query_bbox_head.ckpt"
+    pretrain_path = './co_dino_swin_large_all_heads.ckpt'
+    # pretrain_path = "./co_dino_query_bbox_head.ckpt"
     ms.load_checkpoint(pretrain_path, co_detr)
     print(f'successfully load checkpoint from {pretrain_path}')
 
@@ -87,9 +91,9 @@ if __name__ == '__main__':
     scaler = DynamicLossScaler(scale_value=2 ** 12, scale_factor=2, scale_window=1000)
 
     def forward_func(
-            image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape, ori_shape):
+            image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape):
         loss = co_detr(
-            image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape, ori_shape)
+            image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape)
         return scaler.scale(loss)
 
     grad_fn = ops.value_and_grad(forward_func, grad_position=None, weights=optimizer.parameters)
@@ -141,20 +145,18 @@ if __name__ == '__main__':
             boxes_xyxy = Tensor(in_data['boxes_xyxy'])
             valid = Tensor(in_data['valid'])
             dn_valid = Tensor(in_data['dn_valid'])
-            
+
             img_shape_tuple = ()
             ori_shape_tuple = ()
             for img_shape in in_data['img_shape']:
                img_shape_tuple += (tuple(img_shape.tolist()),)
-            for ori_shape in in_data['ori_shape']:
-               ori_shape_tuple += (tuple(ori_shape.tolist()),)
 
             loss, grads = grad_fn(
                 image, mask, labels, boxes_xywhn, boxes_xyxy,
-                                  valid, dn_valid, img_shape_tuple, ori_shape_tuple)
+                                  valid, dn_valid, img_shape_tuple)
 
-            # loss, grads = grad_fn(feat0, feat1, feat2, feat3, feat4, feat5,
-            #                     image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape, ori_shape)
+            loss, grads = grad_fn(
+                                image, mask, labels, boxes_xywhn, boxes_xyxy, valid, dn_valid, img_shape)
 
             grads = ops.clip_by_global_norm(grads, clip_norm=0.1)
             loss = ops.depend(loss, optimizer(grads))

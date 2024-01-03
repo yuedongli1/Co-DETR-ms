@@ -67,7 +67,7 @@ class RoIExtractor(nn.Cell):
         rois = rois.reshape(batch_size * num_sample, 4)
         rois_mask = rois_mask.reshape(batch_size * num_sample, 1).astype(ms.bool_)
         rois = ops.select(
-            ops.tile(rois_mask, (1, 4)), rois, ops.tile(self.temp_roi.astype(rois.dtype), (batch_size * num_sample, 1))
+            ops.tile(rois_mask.int(), (1, 4)).bool(), rois, ops.tile(self.temp_roi.astype(rois.dtype), (batch_size * num_sample, 1))
         )
         rois = ops.concat((batch_c, rois), 1)
         out_channel = features[0].shape[1]
@@ -75,7 +75,7 @@ class RoIExtractor(nn.Cell):
         res = ops.zeros((batch_size * num_sample, out_channel, self.resolution, self.resolution), features[0].dtype)
         for i in range(self.num_levels):
             mask = ops.logical_and(target_lvls == i, rois_mask)
-            mask = ops.tile(mask.reshape((-1, 1, 1, 1)), (1, out_channel, self.resolution, self.resolution))
+            mask = ops.tile(mask.reshape((-1, 1, 1, 1)).int(), (1, out_channel, self.resolution, self.resolution)).bool()
             roi_feats_t = self.roi_layers[i](features[i], rois)
             res = ops.select(mask, roi_feats_t, res)
         return res.reshape(batch_size, num_sample, out_channel, self.resolution, self.resolution)

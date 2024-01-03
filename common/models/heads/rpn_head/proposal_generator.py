@@ -89,7 +89,6 @@ class ProposalGenerator(nn.Cell):
         N = scores[0].shape[0]
         B = anchors[0].shape[-1]
         pred_objectness_logits, pred_anchor_deltas = (), ()
-
         for score in scores:
             pred_objectness_logits = pred_objectness_logits + (score.transpose((0, 2, 3, 1)).reshape(N, -1),)
         for delta in bbox_deltas:
@@ -132,7 +131,7 @@ class ProposalGenerator(nn.Cell):
                 proposals_ib = proposals_i[b]
                 vaild = nonempty(proposals_ib, self.min_size)
                 logits_ib = ops.select(vaild, logits_i[b], ops.zeros_like(logits_i[b]))
-                proposals_ib = ops.select(ops.tile(vaild.reshape(-1, 1), (1, 4)), proposals_ib, temp_proposals)
+                proposals_ib = ops.select(ops.tile(vaild.reshape(-1, 1).int(), (1, 4)).bool(), proposals_ib, temp_proposals)
                 num_proposals_i = min(Hi_Wi_A, self.pre_nms_top_n)
 
                 # select top num_proposals_i proposals

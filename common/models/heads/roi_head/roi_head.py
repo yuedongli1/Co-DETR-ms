@@ -89,6 +89,33 @@ class RCNNBBoxTwoFCHead(nn.Cell):
         fc7 = self.relu(fc7)
         return fc7
 
+bbox_head_types = {'RCNNBBoxTwoFCHead': RCNNBBoxTwoFCHead}
+
+
+def build_bbox_head(cfg):
+    obj_cls = bbox_head_types.get(cfg['type'])
+    args = cfg.copy()
+    args.pop('type')
+    return obj_cls(**args)
+
+roi_extractor_types = {'RoIExtractor': RoIExtractor}
+
+
+def build_roi_extractor(cfg):
+    obj_cls = roi_extractor_types.get(cfg['type'])
+    args = cfg.copy()
+    args.pop('type')
+    return obj_cls(**args)
+
+bbox_assigner_types = {'BBoxAssigner': BBoxAssigner}
+
+
+def build_bbox_assigner(cfg):
+    obj_cls = bbox_assigner_types.get(cfg['type'])
+    args = cfg.copy()
+    args.pop('type')
+    return obj_cls(**args)
+
 
 def get_head(cfg, resolution=7):
     if cfg.name == "RCNNBBoxTwoFCHead":
@@ -100,29 +127,23 @@ def get_head(cfg, resolution=7):
 class ROIHead(nn.Cell):
     """RCNN bbox head"""
 
-    def __init__(self, cfg, num_classes, with_mask=False):
+    def __init__(self, bbox_head, roi_extractor, bbox_assigner, num_classes=80, with_mask=False):
         super(ROIHead, self).__init__()
-        self.head = get_head(cfg.head, cfg.resolution)
-        self.roi_extractor = RoIExtractor(cfg.resolution, cfg.roi_extractor.featmap_strides)
-        self.bbox_assigner = BBoxAssigner(
-            rois_per_batch=cfg.bbox_assigner.rois_per_batch,
-            bg_thresh=cfg.bbox_assigner.bg_thresh,
-            fg_thresh=cfg.bbox_assigner.fg_thresh,
-            fg_fraction=cfg.bbox_assigner.fg_fraction,
-            with_mask=with_mask,
-        )
+        self.head = build_bbox_head(bbox_head)
+        self.roi_extractor = build_roi_extractor(roi_extractor)
+        self.bbox_assigner = build_bbox_assigner(bbox_assigner)
         self.num_classes = num_classes
         self.cls_loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction="none")
         self.loc_loss = nn.SmoothL1Loss(reduction="none")
         self.bbox_cls = nn.Dense(
-            cfg.head.out_channel,
+            self.head.out_channel,
             self.num_classes + 1,
             weight_init=HeUniform(math.sqrt(5)),
             has_bias=True,
             bias_init="zeros"
         )
         self.bbox_delta = nn.Dense(
-            cfg.head.out_channel,
+            self.head.out_channel,
             4 * self.num_classes,
             weight_init=HeUniform(math.sqrt(5)),
             has_bias=True,
@@ -131,7 +152,8 @@ class ROIHead(nn.Cell):
         self.onehot = nn.OneHot(depth=self.num_classes)
         self.with_mask = with_mask
 
-    def construct(self, feats, rois, rois_mask, gts, gt_masks=None):
+    def construct(self, feats,
+                  rois, rois_mask, gts, gt_masks=None):
         """
         feats (list[Tensor]): Feature maps from backbone
         rois (list[Tensor]): RoIs generated from RPN module

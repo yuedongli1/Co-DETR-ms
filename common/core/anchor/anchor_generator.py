@@ -411,11 +411,12 @@ class AnchorGenerator(nn.Cell):
         """
         feat_h, feat_w = featmap_size
         valid_h, valid_w = valid_size
-        valid_x = ops.zeros(feat_w, dtype=ms.bool_)
-        valid_y = ops.zeros(feat_h, dtype=ms.bool_)
-        valid_x[:valid_w] = 1
-        valid_y[:valid_h] = 1
+        valid_x = ops.zeros(feat_w, dtype=ms.float32)
+        valid_y = ops.zeros(feat_h, dtype=ms.float32)
+        valid_x[:valid_w] = 1.
+        valid_y[:valid_h] = 1.
         valid_xx, valid_yy = self._meshgrid(valid_x, valid_y)
+        valid_xx, valid_yy = valid_xx.bool(), valid_yy.bool()
         valid = ops.logical_and(valid_xx, valid_yy)
         valid = valid[:, None].broadcast_to((valid.shape[0], num_base_anchors)).view(-1)
         return valid

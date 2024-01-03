@@ -44,7 +44,7 @@ class RPNLabelAssignment(nn.Cell):
 
     def __init__(
         self,
-        rnp_sample_batch=256,
+        rpn_sample_batch=256,
         fg_fraction=0.5,
         positive_overlap=0.7,
         negative_overlap=0.3,
@@ -52,7 +52,7 @@ class RPNLabelAssignment(nn.Cell):
         use_random=False,
     ):
         super(RPNLabelAssignment, self).__init__()
-        self.rnp_sample_batch = rnp_sample_batch
+        self.rpn_sample_batch = rpn_sample_batch
         self.fg_fraction = fg_fraction
         self.positive_overlap = positive_overlap
         self.negative_overlap = negative_overlap
@@ -69,7 +69,7 @@ class RPNLabelAssignment(nn.Cell):
         tgt_labels, tgt_bboxes, tgt_deltas = rpn_anchor_target(
             anchors,
             gts,
-            self.rnp_sample_batch,
+            self.rpn_sample_batch,
             self.positive_overlap,
             self.negative_overlap,
             self.fg_fraction,
@@ -153,7 +153,7 @@ class BBoxAssigner(nn.Cell):
 def rpn_anchor_target(
     anchors,
     gt_boxes,
-    rnp_sample_batch,
+    rpn_sample_batch,
     rpn_positive_overlap,
     rpn_negative_overlap,
     rpn_fg_fraction,
@@ -179,22 +179,22 @@ def rpn_anchor_target(
         fg_mask = ops.logical_and(match_labels != -1, match_labels != 0)  # nonzero
         bg_mask = match_labels == 0
         if use_random:
-            fg_num = int(rnp_sample_batch * rpn_fg_fraction)
+            fg_num = int(rpn_sample_batch * rpn_fg_fraction)
             fg_sampler = ops.RandomChoiceWithMask(count=fg_num)
             fg_idx, fg_s_mask = fg_sampler(fg_mask)
             fg_mask = ops.zeros_like(fg_mask)
             fg_mask[fg_idx.reshape(-1)] = fg_s_mask
 
-            bg_num = rnp_sample_batch - fg_num
-            bg_num_mask = ms.numpy.arange(int(rnp_sample_batch)) < bg_num
-            bg_sampler = ops.RandomChoiceWithMask(count=int(rnp_sample_batch))
+            bg_num = rpn_sample_batch - fg_num
+            bg_num_mask = ms.numpy.arange(int(rpn_sample_batch)) < bg_num
+            bg_sampler = ops.RandomChoiceWithMask(count=int(rpn_sample_batch))
             bg_idx, bg_s_mask = bg_sampler(bg_mask)
             bg_mask = ops.zeros_like(bg_mask)
             bg_mask[bg_idx.reshape(-1)] = ops.logical_and(bg_s_mask, bg_num_mask)
         else:
-            fg_num = rnp_sample_batch * rpn_fg_fraction
+            fg_num = rpn_sample_batch * rpn_fg_fraction
             fg_num = min(fg_num, fg_mask.astype(ms.float32).sum().astype(ms.int32))
-            bg_num = rnp_sample_batch - fg_num
+            bg_num = rpn_sample_batch - fg_num
             fg_mask = ops.logical_and(ops.cumsum(fg_mask.astype(ms.float32), 0) < fg_num, fg_mask)
             bg_mask = ops.logical_and(ops.cumsum(bg_mask.astype(ms.float32), 0) < bg_num, bg_mask)
 
@@ -220,7 +220,7 @@ def rpn_anchor_target(
 def label_box(anchors, gt_boxes, positive_overlap, negative_overlap, allow_low_quality):
     iou = ops.iou(anchors, gt_boxes[:, 1:])
     # when invalid gt, iou is -1
-    iou = ops.select(ops.tile(gt_boxes[:, 0:1] >= 0, (1, anchors.shape[0])), iou, -ops.ones_like(iou))
+    iou = ops.select(ops.tile((gt_boxes[:, 0:1] >= 0).int(), (1, anchors.shape[0])).bool(), iou, -ops.ones_like(iou))
 
     # select best matched gt per anchor
     matches, matched_vals = ops.ArgMaxWithValue(axis=0, keep_dims=False)(iou)
@@ -256,7 +256,7 @@ def generate_proposal_target(rois, rois_mask, gts, rois_per_batch, fg_fraction, 
         # matches is the matched box index of roi
         # match_labels is the matched label of roi, -1 is ignore label, 0 is background label.
         roi = ops.concat((roi, gt[:, 1:]), 0)
-        roi_mask = ops.concat((roi_mask, gt[:, 0] >= 0), 0)
+        roi_mask = ops.concat((roi_mask.int(), (gt[:, 0] >= 0).int()), 0).bool()
         matches, match_labels = label_box(roi, gt, fg_thresh, bg_thresh, False)
         match_labels = ops.select(roi_mask.astype(ms.bool_), match_labels, ops.ones_like(match_labels) * -1)
 
@@ -280,8 +280,8 @@ def generate_proposal_target(rois, rois_mask, gts, rois_per_batch, fg_fraction, 
         bg_s_mask = ops.logical_and(bg_s_mask, bg_num_mask)
 
         vaild_idx = ops.concat((fg_idx, bg_idx), 0).reshape(-1)
-        vaild_mask = ops.concat((fg_s_mask, bg_s_mask), 0).reshape(-1)
-        fg_s_mask = ops.concat((fg_s_mask, ops.zeros_like(bg_s_mask)), 0).reshape(-1)
+        vaild_mask = ops.concat((fg_s_mask.int(), bg_s_mask.int()), 0).bool().reshape(-1)
+        fg_s_mask = ops.concat((fg_s_mask.int(), ops.zeros_like(bg_s_mask).int()), 0).bool().reshape(-1)
 
         # Step3: get result
         # set ignore cls to 0
@@ -315,7 +315,7 @@ def generate_proposal_target_with_mask(
         # matches is the matched box index of roi
         # match_labels is the matched label of roi, -1 is ignore label, 0 is background label.
         roi = ops.concat((roi, gt[:, 1:]), 0)
-        roi_mask = ops.concat((roi_mask, gt[:, 0] >= 0), 0)
+        roi_mask = ops.concat((roi_mask.int(), (gt[:, 0] >= 0).int()), 0).bool()
         matches, match_labels = label_box(roi, gt, fg_thresh, bg_thresh, False)
         match_labels = ops.select(roi_mask.astype(ms.bool_), match_labels, ops.ones_like(match_labels) * -1)
 
@@ -342,8 +342,8 @@ def generate_proposal_target_with_mask(
         fg_idx = fg_idx.reshape(-1)
         bg_idx = bg_idx.reshape(-1)
         vaild_idx = ops.concat((fg_idx, bg_idx), 0)
-        vaild_mask = ops.concat((fg_s_mask, bg_s_mask), 0).reshape(-1)
-        fg_s_mask = ops.concat((fg_s_mask, ops.zeros_like(bg_s_mask)), 0).reshape(-1)
+        vaild_mask = ops.concat((fg_s_mask.int(), bg_s_mask.int()), 0).bool().reshape(-1)
+        fg_s_mask = ops.concat((fg_s_mask.int(), ops.zeros_like(bg_s_mask).int()), 0).bool().reshape(-1)
 
         # Step3: get result
         # set ignore cls to 0

@@ -9,8 +9,10 @@ ms_ckpt = []
 for k, v in stacte_dict.items():
     if 'num_batches_tracked' in k:
         continue
-    if 'rpn_head' in k or 'roi_head' in k or 'bbox_head' in k:
-        continue
+    # if 'rpn_head' in k or 'roi_head' in k or 'bbox_head' in k:
+    #     continue
+    if 'relative_position_index' in k:
+        k = k.replace('relative_position_index', 'relative_position_bias_table')
     if 'bn' in k and 'running_mean' in k:
         k = k.replace('running_mean', 'moving_mean')
     if 'bn' in k and 'running_var' in k:
@@ -100,14 +102,25 @@ for k, v in stacte_dict.items():
         k = k.replace('weight', 'gamma')
     if 'query_head.downsample.1.bias' in k:
         k = k.replace('bias', 'beta')
-    # if 'bbox_head' in k:
-    #     k = k.replace('bbox_head.0', 'bbox_head')
-    #     if 'gn.weight' in k:
-    #         k = k.replace('gn.weight', 'norm.gamma')
-    #     if 'gn.bias' in k:
-    #         k = k.replace('gn.bias', 'norm.beta')
+    if 'bbox_head' in k:
+        k = k.replace('bbox_head.0', 'bbox_head')
+        if 'gn.weight' in k:
+            k = k.replace('gn.weight', 'norm.gamma')
+        if 'gn.bias' in k:
+            k = k.replace('gn.bias', 'norm.beta')
+    if 'rpn_head' in k:
+        k = k.replace('rpn_head', 'rpn_head.rpn_feat')
+    if 'roi_head' in k:
+        if 'fc_cls' in k:
+            k = k.replace('0.bbox_head.fc_cls', 'bbox_cls')
+        if 'fc_reg' in k:
+            k = k.replace('0.bbox_head.fc_reg', 'bbox_delta')
+        if 'shared_fcs.0' in k:
+            k = k.replace('0.bbox_head.shared_fcs.0', 'head.fc6')
+        if 'shared_fcs.1' in k:
+            k = k.replace('0.bbox_head.shared_fcs.1', 'head.fc7')
     ms_ckpt.append({'name': k, 'data': Tensor(v.numpy())})
 
-ms.save_checkpoint(ms_ckpt, './co_dino_5scale_swin_large_torch.ckpt')
+ms.save_checkpoint(ms_ckpt, './co_dino_swin_large_all_heads_torch.ckpt')
 
 print('done')
